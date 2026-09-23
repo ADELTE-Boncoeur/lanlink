@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LANLink — Virtual LAN</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="logo">🎮 LANLink</div>
+  <div class="sub">portable P2P virtual LAN · <code>10.242.0.0/16</code></div>
+</header>
+
+<main>
+  <section class="card" id="statusCard">
+    <h2>This PC</h2>
+    <div class="grid">
+      <div><span class="k">Node</span><span id="nodeId">…</span></div>
+      <div><span class="k">Virtual IP</span><span id="vip" class="mono">…</span></div>
+      <div><span class="k">Room</span><span id="room" class="mono">…</span></div>
+      <div><span class="k">Adapter</span><span id="tun">…</span></div>
+      <div><span class="k">Public</span><span id="pub" class="mono">…</span></div>
+    </div>
+    <div class="row">
+      <input id="roomInput" placeholder="Room code e.g. HALO-42" maxlength="32">
+      <button id="joinBtn">Join room</button>
+      <button id="refreshBtn" class="ghost">Refresh</button>
+    </div>
+    <p class="hint">Same room code on every PC = same internet lobby. On one Wi-Fi you need no room at all — hosts appear below automatically.</p>
+  </section>
+
+  <section class="card">
+    <h2>Players <span id="peerCount" class="pill">0</span></h2>
+    <table>
+      <thead><tr><th>Player</th><th>Virtual IP</th><th>Endpoint</th><th>Via</th><th>Ping</th><th></th></tr></thead>
+      <tbody id="peers"><tr><td colspan="6" class="empty">No peers yet — start a second node or share your room code.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>How to play</h2>
+    <ol>
+      <li>One player hosts the game normally (LAN / Offline → Host).</li>
+      <li>Everyone joins with the host's <b>virtual IP</b> shown above (<code>10.242.x.y</code>), same as a LAN address.</li>
+      <li>Run as <b>Administrator with <code>-tun</code></b> for real game packets; the table ping above works in any mode.</li>
+    </ol>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
