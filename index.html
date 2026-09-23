@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LANLink — Play LAN games with friends over the internet</title>
+<meta name="description" content="Free, portable P2P virtual LAN for retro LAN gaming. No port forwarding, no install. Download the ZIP, double-click, play.">
+<style>
+:root{color-scheme:dark;--bg:#0b0e14;--card:#141a26;--line:#263049;--txt:#eaf0fa;--dim:#93a0b8;--acc:#3b82f6;--grn:#22c55e}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 500px at 50% -10%,#16213a,var(--bg));color:var(--txt);font:16px/1.6 system-ui,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:0 20px}
+header.top{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
+.logo{font-size:22px;font-weight:800}.logo span{color:var(--acc)}
+a.btn{display:inline-block;background:var(--acc);color:#fff;font-weight:700;text-decoration:none;border-radius:12px;padding:14px 28px;font-size:17px;border:0;cursor:pointer}
+a.btn:hover{filter:brightness(1.12)}a.btn.big{font-size:19px;padding:16px 36px}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);font-size:15px;padding:10px 18px}
+.hero{text-align:center;padding:48px 0 30px}.hero h1{font-size:clamp(30px,5vw,50px);margin:0 0 12px;line-height:1.15}
+.hero p{color:var(--dim);font-size:18px;max-width:640px;margin:0 auto 26px}
+.badges{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px;color:var(--dim);font-size:13px}
+.badges span{border:1px solid var(--line);border-radius:20px;padding:3px 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin:22px 0}
+.card h2{margin:0 0 12px;font-size:21px}
+.steps{display:grid;gap:12px}.step{display:flex;gap:14px;align-items:flex-start}
+.n{background:var(--acc);border-radius:50%;min-width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:800}
+code{background:#0b0e14;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-family:Consolas,monospace;font-size:14px;word-break:break-all}
+pre{background:#0b0e14;border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-size:13px}
+.tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.tab{background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:9px 16px;cursor:pointer;font-size:15px}
+.tab.on{background:var(--acc);border-color:var(--acc);font-weight:700}
+details{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+footer{color:var(--dim);text-align:center;padding:30px 0 50px;font-size:14px}
+footer a{color:var(--acc)}
+.dlbox{text-align:center;padding:10px 0}
+.note{color:var(--dim);font-size:14px}
+.ok{color:var(--grn);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="logo">🎮 LAN<span>Link</span></div>
+  <a class="btn ghost" href="https://github.com/ADELTE-Boncoeur/lanlink">GitHub</a>
+</header>
+
+<section class="hero">
+  <h1>Play LAN-only games with friends,<br>from different houses.</h1>
+  <p>LANLink creates a private virtual network between your PCs over the internet — your old games think everyone is on the same Wi-Fi. No port forwarding. No accounts. Nothing to install.</p>
+  <a class="btn big" href="https://github.com/ADELTE-Boncoeur/lanlink/archive/refs/heads/main.zip">⬇ Download LANLink (.zip)</a>
+  <div class="badges"><span class="ok">✔ Tested: 33/33 checks pass</span><span>Windows</span><span>Free &amp; open-source</span><span>~100 KB, USB-portable</span></div>
+</section>
+
+<section class="card">
+  <h2>Install in 3 steps (every player, once)</h2>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><div><b>Install Python</b> from <a href="https://www.python.org/downloads/" style="color:var(--acc)">python.org</a> — on the first setup screen tick <b>“Add python.exe to PATH”</b>.</div></div>
+    <div class="step"><div class="n">2</div><div><b>Download &amp; unzip</b> using the blue button above (or <a href="https://github.com/ADELTE-Boncoeur/lanlink" style="color:var(--acc)">clone the repo</a>) — Desktop or USB stick, anywhere.</div></div>
+    <div class="step"><div class="n">3</div><div><b>Allow the firewall popup</b> the first time you run it (tick Private networks → Allow access).</div></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Start a game night</h2>
+  <div class="tabs">
+    <button class="tab on" onclick="show('wifi',this)">Same Wi-Fi</button>
+    <button class="tab" onclick="show('net',this)">Different houses (internet)</button>
+  </div>
+  <div id="wifi">
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div>Everyone double-clicks <code>start-player.bat</code>, types their name, presses Enter. A page opens: <code>http://127.0.0.1:32441</code>.</div></div>
+      <div class="step"><div class="n">2</div><div>Check the other players appear, then click <b>Ping</b> — anything under 100 ms is great.</div></div>
+      <div class="step"><div class="n">3</div><div>One person hosts the game in <b>LAN / Local multiplayer</b>. Others join with the host's virtual IP (<code>10.242.x.y</code> from the page). Play! 🎉</div></div>
+    </div>
+  </div>
+  <div id="net" style="display:none">
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div>One friend double-clicks <code>start-signaling.bat</code> and leaves the window open — this is the “meeting point” that introduces players (game data still flows directly PC-to-PC).</div></div>
+      <div class="step"><div class="n">2</div><div>That friend shares their address (<code>ipconfig</code> → IPv4, or google “what is my ip”) and an invented <b>Room Code</b> like <code>HALO-42</code>.</div></div>
+      <div class="step"><div class="n">3</div><div>Everyone runs <code>start-player.bat</code>, pastes <code>http://THAT-ADDRESS:32440</code> as the server, enters the same Room Code — then plays exactly like a LAN game.</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>For developers</h2>
+  <pre>git clone https://github.com/ADELTE-Boncoeur/lanlink.git
+cd lanlink
+python py\test_all.py   # 33 automated checks, exit 0 = green</pre>
+  <p class="note">Go backend (single static binary), Python reference node, encrypted UDP mesh (<code>HEADER(20)+CT+TAG(8)</code>), UDP hole-punching via STUN, room-code signaling. Full protocol spec in the repo README.</p>
+</section>
+
+<section class="card">
+  <h2>Not working? 30-second fixes</h2>
+  <details><summary>No players appear</summary><p class="note">Same Room Code on all PCs (capitals matter) · same signaling address · firewall allowed Python · wait 30 seconds.</p></details>
+  <details><summary>Ping says “timeout”</summary><p class="note">Firewall blocked it — allow Python through, keep both black windows open.</p></details>
+  <details><summary>“address already in use”</summary><p class="note">An old window is still running — close all black LANLink windows, wait 10 s, retry.</p></details>
+  <details><summary>Game can’t find the host</summary><p class="note">Join with the host’s <b>virtual</b> IP (<code>10.242.x.y</code> from the page), not their normal IP, and host in the game’s LAN mode.</p></details>
+</section>
+
+<div class="card dlbox">
+  <a class="btn big" href="https://github.com/ADELTE-Boncoeur/lanlink/archive/refs/heads/main.zip">⬇ Download LANLink (.zip)</a>
+  <p class="note">Unzip → double-click <code>start-player.bat</code> → play. Full guide: <a href="https://github.com/ADELTE-Boncoeur/lanlink/blob/main/GUIDE-FOR-BEGINNERS.md" style="color:var(--acc)">GUIDE-FOR-BEGINNERS.md</a></p>
+</div>
+
+<footer>LANLink — free &amp; open-source P2P virtual LAN · <a href="https://github.com/ADELTE-Boncoeur/lanlink">github.com/ADELTE-Boncoeur/lanlink</a></footer>
+</div>
+<script>
+function show(id,btn){document.getElementById('wifi').style.display=id==='wifi'?'block':'none';document.getElementById('net').style.display=id==='net'?'block':'none';document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));btn.classList.add('on');}
+</script>
+</body>
+</html>
