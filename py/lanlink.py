@@ -19,6 +19,7 @@ import os
 import random
 import socket
 import struct
+import sys
 import threading
 import time
 import urllib.request
@@ -378,7 +379,21 @@ def args_stun_enabled():
     return True
 
 
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+def _frontend_dir():
+    # 1) PyInstaller bundle: UI files are embedded next to the bootloader.
+    if getattr(sys, "frozen", False):
+        p = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), "frontend")
+        if os.path.isdir(p):
+            return p
+    # 2) Dev layout: <repo>/py/lanlink.py -> <repo>/frontend
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+    if os.path.isdir(p):
+        return p
+    # 3) Portable layout: LANLink.exe sitting beside a frontend/ folder.
+    return os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "frontend")
+
+
+FRONTEND_DIR = _frontend_dir()
 
 
 class UIHandler(BaseHTTPRequestHandler):

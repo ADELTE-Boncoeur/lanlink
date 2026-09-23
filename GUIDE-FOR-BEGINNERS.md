@@ -16,9 +16,15 @@ password (your Room Code), so strangers can't read it or join in.
 
 ---
 
-## PART 1 — Install (every player, one time, ~5 minutes)
+## PART 1 — Install (every player, one time, ~2 minutes)
 
-1. **Install Python** (the only thing LANLink needs):
+**Easiest (no Python needed):** download **`LANLink.exe`** (single 5.6 MB file —
+button on the website or in the project folder) and double-click it.
+If Windows SmartScreen says "Unknown publisher", click **More info → Run anyway**.
+Then skip to Part 2 — the `.bat` launchers use the `.exe` automatically.
+
+**From source (needs Python):** only if you want the code, not the app:
+1. **Install Python** (the only thing the source version needs):
    - Go to https://www.python.org/downloads/ → big yellow **Download** button → run it.
    - ⚠️ On the FIRST install screen, tick the little box
      **"Add python.exe to PATH"** at the bottom, then click Install.

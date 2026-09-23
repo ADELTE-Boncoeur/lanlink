@@ -7,9 +7,19 @@ set /p SIGNAL="Signaling server - Enter for same-WiFi, or http://HOST-IP:32440 :
 echo.
 echo Join the page that opens:  http://127.0.0.1:32441
 start http://127.0.0.1:32441
-if "%SIGNAL%"=="" (
-  python py\lanlink.py --name "%NAME%" --room "%ROOM%"
+if exist "%~dp0LANLink.exe" (
+  echo Using LANLink.exe - no Python needed.
+  if "%SIGNAL%"=="" (
+    "%~dp0LANLink.exe" --name "%NAME%" --room "%ROOM%"
+  ) else (
+    "%~dp0LANLink.exe" --name "%NAME%" --room "%ROOM%" --signal "%SIGNAL%"
+  )
 ) else (
-  python py\lanlink.py --name "%NAME%" --room "%ROOM%" --signal "%SIGNAL%"
+  echo LANLink.exe not found - using Python instead.
+  if "%SIGNAL%"=="" (
+    python py\lanlink.py --name "%NAME%" --room "%ROOM%"
+  ) else (
+    python py\lanlink.py --name "%NAME%" --room "%ROOM%" --signal "%SIGNAL%"
+  )
 )
 pause

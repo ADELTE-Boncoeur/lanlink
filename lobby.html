@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LANLink Lobby — meet players & test your connection in the browser</title>
+<meta name="description" content="Join a LANLink room from your browser: see who's online and measure direct PC-to-PC latency over WebRTC. No install.">
+<style>
+:root{color-scheme:dark;--bg:#0b0e14;--card:#141a26;--line:#263049;--txt:#eaf0fa;--dim:#93a0b8;--acc:#3b82f6;--grn:#22c55e;--red:#ef4444}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 500px at 50% -10%,#16213a,var(--bg));color:var(--txt);font:15px/1.6 system-ui,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px 60px}
+header.top{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
+.logo{font-size:22px;font-weight:800}.logo span{color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0}
+h1{font-size:clamp(24px,4vw,36px);margin:26px 0 6px}.sub{color:var(--dim);margin:0 0 8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+input{background:#0b0e14;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px 12px;font-size:15px;flex:1;min-width:140px}
+button{background:var(--acc);border:0;color:#fff;border-radius:10px;padding:11px 20px;font-weight:700;cursor:pointer;font-size:15px}
+button.ghost{background:transparent;border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--red);margin-right:6px}
+.dot.on{background:var(--grn)}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
+.empty{color:var(--dim);text-align:center}
+#log{background:#0b0e14;border:1px solid var(--line);border-radius:10px;padding:10px;height:130px;overflow:auto;font-size:12px;color:var(--dim);margin-top:10px}
+.note{color:var(--dim);font-size:13px}
+a{color:var(--acc)}
+.pill{background:#1d2b4d;border-radius:20px;padding:1px 10px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top"><div class="logo">🎮 LAN<span>Link</span> lobby</div><a href="index.html">← main page</a></header>
+<h1>Meet your players in the browser</h1>
+<p class="sub">Enter the same <b>room code</b> as your friends. You'll see each other appear and can measure the <b>direct PC-to-PC latency</b> (WebRTC, no install). To play actual games, everyone still needs the <a href="index.html">downloaded app</a> — browsers are not allowed to carry game network traffic.</p>
+
+<section class="card">
+  <div class="row">
+    <input id="name" placeholder="Your name (e.g. Karim)" maxlength="24">
+    <input id="room" placeholder="Room code (e.g. HALO-42)" maxlength="32">
+    <button id="joinBtn">Join room</button>
+    <button id="leaveBtn" class="ghost" disabled>Leave</button>
+  </div>
+  <p class="note"><span class="dot" id="dot"></span><span id="status">Not connected.</span></p>
+</section>
+
+<section class="card">
+  <h2 style="margin:0 0 6px">Players <span class="pill" id="count">0</span></h2>
+  <table><thead><tr><th>Player</th><th>Link</th><th>Ping</th><th></th></tr></thead>
+  <tbody id="peers"><tr><td colspan="4" class="empty">Join a room to see players.</td></tr></tbody></table>
+  <pre id="log"></pre>
+</section>
+
+<section class="card"><p class="note" style="margin:0">Green ping = your PCs can reach each other directly — the game will run great. If a player never turns green, one of you is behind a strict NAT/firewall: the downloaded app's UDP hole-punching handles more of those cases than browsers allow. Get it on the <a href="index.html">main page</a>.</p></section>
+</div>
+<script src="https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js"></script>
+<script src="lobby.js"></script>
+</body>
+</html>
