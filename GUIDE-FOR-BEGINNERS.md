@@ -35,16 +35,28 @@ On the same Wi-Fi, forget it exists — nobody runs it.
 2. **You (host)**: open CoD → Multiplayer → **Start New Server** (a normal
    LAN server, like your friend sits next to you). Note YOUR virtual IP
    from the LANLink page, e.g. `10.242.51.102`. Tell it to Mike.
-3. **Mike**: open CoD → enable console first (Options → Game Options →
-   Enable Console: Yes) → press the **`~`** key → type
-   `connect 10.242.51.102` (YOUR virtual IP) → Enter.
-4. **You both play.** 🎉
+3. **Mike**: on his LANLink page, find your game in **🎮 Game servers** →
+   click **Copy join IP** (it copies the address that actually works for him)
+   → open CoD → press **`~`** (enable console first: Options → Game Options →
+   Enable Console: Yes) → type `connect` + paste → Enter.
+   (Same Wi-Fi usually pastes a `192.168.x.y` address — that one works today.
+   The `10.242.x.y` virtual address needs TUN mode below.)
+4. **You both play.** 🎉 Chat in the page's 💬 Lobby chat to coordinate.
 
 ⚠️ Honest note: Mike will probably **NOT** see your server in CoD's automatic
-server list — that auto-list needs a special network driver (the advanced
-`wintun` version, see ROADMAP.md). The `connect` command above is the way in,
-and it works in CoD4, CoD:WaW, MW2 and most old PC shooters with a console.
-If a game has "Connect to IP" in its menus, use that instead of the console.
+server list — that auto-list needs a special network driver. Until the TUN
+mode below is battle-tested, connect with the address the page gives you
+(same Wi-Fi: the direct `192.168.x.y` one). If a game has "Connect to IP"
+in its menus, use that instead of the console.
+
+**TUN mode (experimental — makes virtual IPs work in games):**
+1. Download `wintun.dll` from https://www.wintun.net (64-bit `amd64` folder)
+   and put it next to `LANLink.exe`.
+2. Right-click `LANLink.exe` → **Run as administrator**, then start it with
+   `--tun` (or edit `start-player.bat`). Windows gets a real `LANLink`
+   adapter with your `10.242.x.y`, and `connect 10.242.x.y` works in-game.
+   Please report whether it worked — this path is new and untested on
+   locked-down PCs.
 
 ## PART 1 — Install (every player, one time, ~2 minutes)
 
@@ -121,6 +133,8 @@ extra libraries. Share its `https://...` address as the signaling server.
 | No players appear after 30 s | Everyone on same Room Code (capitals matter); firewall allowed; same signaling server address |
 | Ping button says `timeout` | Firewall blocked it — allow Python; both players keep the window open |
 | `address already in use` | An old window is still running — close black windows, wait 10 s, retry |
+| Players never appear on same Wi-Fi | Run `fix-firewall.bat` **as Administrator** (sets Private + opens ports). Still nothing? Router → turn **AP/Client Isolation OFF** |
+| CoD says `server timed out` on `connect` | You pasted a `10.242.x.y` without TUN mode, or a wrong-subnet address. Use the page's **Copy join IP** button — it picks the working one |
 | `unrecognized arguments: --serve` | Your `LANLink.exe` is older than your `.bat` — re-download the exe from GitHub (the launcher prints the version: you want v1.2.0+) |
 | Typed `http://host-ip:32440` / `ERR_NAME_NOT_RESOLVED` | `host-ip` is only an EXAMPLE, not an address! Same Wi-Fi → leave it **empty** (press Enter). Internet → type the host friend's **real** numbers |
 | Game can't find the host | Join with the host's **virtual** IP (`10.242.x.y` from the page), not their normal IP; host must use the game's LAN mode |

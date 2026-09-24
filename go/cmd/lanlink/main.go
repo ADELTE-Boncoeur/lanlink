@@ -220,6 +220,17 @@ func (n *node) meshRecvLoop() {
 				n.gamesMu.Unlock()
 				log.Printf("lobby: game server '%s' @ %s", info.Title, h.Src)
 			}
+		case mesh.TypeChat:
+			var msg struct {
+				From string `json:"from"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(pt, &msg); err == nil && msg.Text != "" {
+				if len(msg.Text) > 200 {
+					msg.Text = msg.Text[:200]
+				}
+				log.Printf("chat %s: %s", msg.From, msg.Text)
+			}
 		}
 	}
 }

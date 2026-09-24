@@ -26,9 +26,14 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+try:
+    import wintun  # optional: real adapter via wintun.dll (needs Admin)
+except ImportError:
+    wintun = None
+
 MAGIC = 0x4C4C4E4B
 VER = 1
-T_DATA, T_PING, T_PONG, T_PUNCH, T_LOBBY = 0x01, 0x02, 0x03, 0x04, 0x05
+T_DATA, T_PING, T_PONG, T_PUNCH, T_LOBBY, T_CHAT = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06
 HDLEN, TAGLEN = 20, 8
 BCAST_PORT = 32442
 VERSION = "1.2.0"
@@ -182,8 +187,11 @@ class Node:
         self.disc_last = None  # timestamp of last foreign hello
         self.serve_title = (getattr(args, "serve", "") or "").strip()[:64]
         self.games = {}  # vip -> {title, node_id, seen} (game servers on the mesh)
+        self.chat = []  # [{from, text, ts}] lobby messages (cap 50)
         self.auto_game = ""  # auto-detected local game server (no typing needed)
         self._tick = 0
+        self.tun = None  # real adapter when --tun succeeds (else lobby mode)
+        self.has_signal = bool((getattr(args, "signal", "") or "").strip())
         self._ips_cache = []  # our local IPv4s (multi-homed PCs have several)
         self._ips_at = 0.0
         self.seq = random.randint(1, 1 << 30)
@@ -383,8 +391,14 @@ class Node:
                         if src in self.peers:
                             self.peers[src]["rtt"] = (time.time() - t0) * 1000.0
             elif ptype == T_DATA:
-                print(f"[tun-stub] DATA {src} -> {dst} ({len(pt)}B) "
-                      f"(run Go build -tun as Admin for real injection)")
+                if self.tun is not None:
+                    try:
+                        self.tun.write(pt)  # into Windows -> the game reads it
+                    except Exception as e:
+                        print(f"[tun] inject failed ({e})")
+                else:
+                    print(f"[tun-stub] DATA {src} -> {dst} ({len(pt)}B) "
+                          f"(use --tun as Admin + wintun.dll for real game traffic)")
             elif ptype == T_LOBBY:
                 try:
                     info = json.loads(pt.decode())
@@ -396,6 +410,18 @@ class Node:
                                                "lan": info.get("lan", ""),
                                                "seen": time.time()}
                         print(f"[lobby] game server '{title}' @ {src}")
+                except Exception:
+                    pass
+            elif ptype == T_CHAT:
+                try:
+                    msg = json.loads(pt.decode())
+                    text = str(msg.get("text", ""))[:200]
+                    if text:
+                        with self.lock:
+                            self.chat.append({"from": msg.get("from", src),
+                                              "text": text, "ts": time.time()})
+                            del self.chat[:-50]
+                        print(f"[chat] {msg.get('from', src)}: {text}")
                 except Exception:
                     pass
 
@@ -634,7 +660,11 @@ class UIHandler(BaseHTTPRequestHandler):
             last = self.node.disc_last
             return self._json({"node_id": self.node.nodeID(), "vip": self.node.vip,
                                "room": self.node.room, "public": self.node.public,
-                               "tun": "lanlink-stub (userspace)", "peers": len(self.node.peers),
+                               "tun": "lanlink-tun (real adapter)" if self.node.tun is not None
+                                     else "lanlink-stub (userspace)",
+                               "tun_real": self.node.tun is not None,
+                               "has_signal": self.node.has_signal,
+                               "peers": len(self.node.peers),
                                "discovery": {
                                    "hellos_sent": self.node.disc_sent,
                                    "players_heard": self.node.disc_heard,
@@ -658,6 +688,9 @@ class UIHandler(BaseHTTPRequestHandler):
                          "seen_s_ago": round(time.time() - g["seen"], 1)}
                         for k, g in self.node.games.items()]
             return self._json({"games": rows})
+        if u.path == "/api/chat":
+            with self.node.lock:
+                return self._json({"chat": list(self.node.chat)})
         # static frontend
         path = u.path.lstrip("/") or "index.html"
         fp = os.path.join(FRONTEND_DIR, path)
@@ -700,7 +733,62 @@ class UIHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "rtt_ms": rtt})
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)})
+        if u.path == "/api/chat":
+            text = str(data.get("text", ""))[:200].strip()
+            if not text:
+                return self._json({"ok": False, "error": "empty"})
+            payload = json.dumps({"from": self.node.name, "text": text,
+                                  "ts": time.time()}).encode()
+            with self.node.lock:
+                vips = list(self.node.peers.keys())
+                self.node.chat.append({"from": self.node.name + " (you)",
+                                       "text": text, "ts": time.time()})
+                del self.node.chat[:-50]
+            sent = 0
+            for vip in vips:
+                for ep in self.node._cands(vip):
+                    try:
+                        frame = seal(self.node.key, self.node.vip, vip, T_CHAT,
+                                     self.node.next_seq(), payload)
+                        self.node.sock.sendto(frame, ep)
+                        sent += 1
+                    except Exception:
+                        pass
+            return self._json({"ok": True, "sent_to": sent})
         self.send_error(404)
+
+
+def tun_pump(n):
+    """Forward raw OS packets from the real adapter into the encrypted mesh."""
+    print("[tun] forwarding Windows packets <-> mesh (10.242.0.0/16)")
+    idle = 0
+    while True:
+        try:
+            pkt = n.tun.read()
+        except Exception as e:
+            print(f"[tun] read error ({e})")
+            time.sleep(1)
+            continue
+        if not pkt:
+            idle += 1
+            if idle >= 200:
+                time.sleep(0.02)
+                idle = 0
+            continue
+        idle = 0
+        if len(pkt) < 20:
+            continue
+        try:
+            dst = socket.inet_ntoa(pkt[16:20])
+        except OSError:
+            continue
+        if not dst.startswith("10.242."):
+            continue  # not our virtual subnet — leave to Windows
+        for ep in n._cands(dst):
+            try:
+                n.sock.sendto(seal(n.key, n.vip, dst, T_DATA, n.next_seq(), pkt), ep)
+            except Exception:
+                pass
 
 
 def main():
@@ -714,6 +802,8 @@ def main():
                     help="do not auto-open the UI page in a browser")
     ap.add_argument("--serve", default="",
                     help='announce a hosted game, e.g. --serve "CoD4 mp_shipment"')
+    ap.add_argument("--tun", action="store_true",
+                    help="attach real TUN adapter (needs wintun.dll + Run as Administrator)")
     ap.add_argument("--version", action="version", version="LANLink " + VERSION)
     args = ap.parse_args()
 
@@ -737,8 +827,17 @@ def main():
     url = f"http://127.0.0.1:{args.ui_port}"
     print(f"[lanlink] LANLink v{VERSION} node {n.name} vip={n.vip} room={n.room} "
           f"mesh=:{args.mesh_port} ui={url}")
-    print(f"[tun-stub] userspace mode (no Admin needed). "
-          f"Go build + '-tun' as Admin attaches the real adapter.")
+    if args.tun:
+        if wintun is None:
+            print("[tun] wintun module missing — staying in lobby mode.")
+        else:
+            n.tun = wintun.attach_tun(n.vip)
+        if n.tun is not None:
+            threading.Thread(target=tun_pump, args=(n,), daemon=True).start()
+        else:
+            print("[tun] lobby/ping mode. For real game traffic: wintun.dll + Run as Admin + --tun.")
+    else:
+        print("[tun] lobby mode (discovery/ping/chat). Add --tun as Admin for real game traffic.")
     if not args.no_browser:
         try:
             import webbrowser

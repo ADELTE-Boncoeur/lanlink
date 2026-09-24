@@ -248,6 +248,13 @@ try:
           str(peers[U1]))
     check("games API carries host LAN address",
           all(g.get("lan") for g in bg), str(bg))
+    r = post(f"http://127.0.0.1:{U1}/api/chat", {"text": "ready?"})
+    check("chat send ok", r.get("ok") is True, str(r))
+    time.sleep(2)  # chat is instant UDP — no interval to wait out
+    c = json.loads(get(f"http://127.0.0.1:{U2}/api/chat")[1])["chat"]
+    check("chat arrives over encrypted mesh",
+          any(m.get("text") == "ready?" and "Alpha" in m.get("from", "") for m in c),
+          str(c))
 
     # every pair in HALO-42 pings both ways through the encrypted mesh
     for a, b in [(U1, U2), (U1, U3), (U2, U3)]:

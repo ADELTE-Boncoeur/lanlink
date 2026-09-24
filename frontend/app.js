@@ -1,6 +1,7 @@
 // Lightweight UI — plain fetch() polling, no framework (keeps binary tiny).
 const $ = (id) => document.getElementById(id);
 const logEl = $("log");
+let lastStatus = {};
 function log(m) {
   logEl.textContent += new Date().toLocaleTimeString() + "  " + m + "\n";
   logEl.scrollTop = logEl.scrollHeight;
@@ -14,6 +15,7 @@ async function api(path, opts) {
 async function refresh() {
   try {
     const s = await api("/api/status");
+    lastStatus = s;
     $("nodeId").textContent = s.node_id || "…";
     $("vip").textContent = s.vip || "…";
     $("room").textContent = s.room || "…";
@@ -25,6 +27,7 @@ async function refresh() {
       const g = await api("/api/games");
       renderGames(g.games || []);
     } catch (e) { /* games optional on old nodes */ }
+    refreshChat();
     const p = await api("/api/peers");
     const rows = p.peers || [];
     $("peerCount").textContent = rows.length;
@@ -44,9 +47,11 @@ async function refresh() {
       const tr = document.createElement("tr");
       if (mismatch) tr.style.opacity = "0.55";
       const rtt = !r.rtt_ms ? "—" : (r.rtt_ms < 1 ? "&lt;1 ms" : r.rtt_ms.toFixed(0) + " ms");
-      const sameTag = r.same_lan ? '<br><span style="background:#238636;border-radius:10px;padding:0 8px;font-size:11px">same Wi-Fi ✓ direct play works</span>' : "";
+      const reach = r.same_lan
+        ? `<br><span style="background:#238636;border-radius:10px;padding:0 8px;font-size:11px">same Wi-Fi ✓ CoD: connect ${(r.endpoint || "").split(":")[0]}</span>`
+        : `<br><span style="color:#8b949e;font-size:11px">remote — CoD via virtual IP needs TUN mode</span>`;
       tr.innerHTML = `<td>${r.node_id || "?"}</td><td class="mono">${r.vip}</td>` +
-        `<td class="mono">${r.endpoint || ""}${sameTag}</td><td>${r.source || ""}</td>` +
+        `<td class="mono">${r.endpoint || ""}${reach}</td><td>${r.source || ""}</td>` +
         `<td class="mono">${escapeHtml(rRoom) || "?"}</td><td>${rtt}</td>`;
       const td = document.createElement("td");
       const b = document.createElement("button");
@@ -99,16 +104,17 @@ function renderGames(games) {
   }
   for (const g of games) {
     const tr = document.createElement("tr");
+    const best = (g.same_lan && g.lan) ? g.lan : g.vip;
     const join = `<span class="mono">${g.vip}</span>` + ((g.same_lan && g.lan)
       ? `<br><span style="color:#8b949e;font-size:12px">same Wi-Fi — or connect direct: <span class="mono">${escapeHtml(g.lan)}</span></span>` : "");
     tr.innerHTML = `<td>${escapeHtml(g.title || "?")}</td>` +
       `<td>${escapeHtml(g.node_id || "?")}</td><td>${join}</td>`;
     const td = document.createElement("td");
     const b = document.createElement("button");
-    b.textContent = "Copy IP";
+    b.textContent = "Copy join IP";
     b.onclick = async () => {
-      try { await navigator.clipboard.writeText(g.vip); log("copied " + g.vip + " — paste it in your game (CoD: connect " + g.vip + ")"); }
-      catch (e) { log("copy manually: " + g.vip); }
+      try { await navigator.clipboard.writeText(best); log(`copied ${best} — in your game: connect ${best}`); }
+      catch (e) { log("copy manually: " + best); }
     };
     td.appendChild(b);
     tr.appendChild(td);
@@ -135,5 +141,37 @@ function renderNetHelp(d, peerCount) {
   } else if (heard > 0) {
     html += `<p>👂 Announcements heard but no players listed yet — they should appear within seconds. If not, firewalls are eating the replies (see step 2 above).</p>`;
   }
+  if (sent >= 2 && heard === 0 && !lastStatus.has_signal) {
+    html += `<p>🛜 Same Wi-Fi but total silence? Your router may isolate devices — log in and turn <b>AP/Client Isolation OFF</b> — or Windows set this network to <b>Public</b>. Run <code>fix-firewall.bat</code> as Administrator: it sets Private + opens the ports.</p>`;
+  }
   el.innerHTML = html;
 }
+
+async function refreshChat() {
+  try {
+    const c = await api("/api/chat");
+    const box = $("chatbox");
+    if (!box) return;
+    box.innerHTML = "";
+    const msgs = c.chat || [];
+    if (!msgs.length) box.innerHTML = '<div class="empty">No messages yet — say hi to coordinate the match.</div>';
+    for (const m of msgs) {
+      const div = document.createElement("div");
+      div.innerHTML = `<b>${escapeHtml(m.from || "?")}:</b> ${escapeHtml(m.text || "")}`;
+      box.appendChild(div);
+    }
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { /* ignore */ }
+}
+
+$("sendBtn").onclick = async () => {
+  const t = $("chatInput").value.trim();
+  if (!t) return;
+  $("chatInput").value = "";
+  await api("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: t }),
+  });
+  refreshChat();
+};
