@@ -145,6 +145,9 @@ class Node:
         self.public = ""
         self.peers = {}  # vip -> {node_id, cands:{(ip,port):src}, primary, rtt, seen}
         self.lock = threading.Lock()
+        self.disc_sent = 0    # broadcast hellos transmitted (diagnostics)
+        self.disc_heard = 0   # foreign hellos received (diagnostics)
+        self.disc_last = None  # timestamp of last foreign hello
         self.seq = random.randint(1, 1 << 30)
         self.pending = {}
         self._stun_txn = None
@@ -284,9 +287,14 @@ class Node:
                 continue
             if h.get("magic") != "LLNK" or h.get("node_id") == self.name:
                 continue
-            rvip, rp = h.get("vip"), int(h.get("mesh_port", 0))
+            try:
+                rvip, rp = h.get("vip"), int(h.get("mesh_port", 0))
+            except (TypeError, ValueError):
+                continue
             if not rvip or not rp:
                 continue
+            self.disc_heard += 1
+            self.disc_last = time.time()
             ep = (frm[0], rp)
             if rvip == self.vip:
                 print(f"[discovery] VIP clash on {rvip} — staying (salt bump in Go build)")
@@ -295,20 +303,50 @@ class Node:
             print(f"[discovery] LAN peer {h.get('node_id')} ({rvip}) via {ep[0]}:{ep[1]}")
             self.punch(ep)
 
+    def _bcast_targets(self):
+        """Global + subnet-directed broadcast addresses.
+
+        Some Wi-Fi drivers/stacks deliver one but not the other, so we send
+        both. connect() transmits nothing — it only reveals our local IP.
+        """
+        targets = [("255.255.255.255", BCAST_PORT)]
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("192.0.2.1", 9))
+            local = s.getsockname()[0]
+            s.close()
+            parts = (local or "").split(".")
+            if len(parts) == 4 and not local.startswith("127."):
+                directed = ".".join(parts[:3] + ["255"])
+                if (directed, BCAST_PORT) not in targets:
+                    targets.append((directed, BCAST_PORT))
+        except Exception:
+            pass
+        return targets
+
     def _bcast_loop(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         hello = lambda: json.dumps({"magic": "LLNK", "node_id": self.name, "vip": self.vip,
                                     "mesh_port": self.mesh_port, "room": self.room,
                                     "ts": int(time.time())}).encode()
+
+        def burst():
+            for tgt in self._bcast_targets():
+                try:
+                    s.sendto(hello(), tgt)
+                except Exception:
+                    pass
+            self.disc_sent += 1
+
         try:
-            s.sendto(hello(), ("255.255.255.255", BCAST_PORT))
+            burst()  # immediate announce so hosts appear instantly
         except Exception as e:
-            print(f"[discovery] broadcast blocked ({e})")
+            print(f"[discovery] broadcast blocked ({e}) — same-WiFi discovery needs UDP broadcast allowed")
         while True:
             time.sleep(3)
             try:
-                s.sendto(hello(), ("255.255.255.255", BCAST_PORT))
+                burst()
             except Exception:
                 pass
 
@@ -413,9 +451,15 @@ class UIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/api/status":
+            last = self.node.disc_last
             return self._json({"node_id": self.node.nodeID(), "vip": self.node.vip,
                                "room": self.node.room, "public": self.node.public,
-                               "tun": "lanlink-stub (userspace)", "peers": len(self.node.peers)})
+                               "tun": "lanlink-stub (userspace)", "peers": len(self.node.peers),
+                               "discovery": {
+                                   "hellos_sent": self.node.disc_sent,
+                                   "players_heard": self.node.disc_heard,
+                                   "last_heard_s_ago": round(time.time() - last, 1) if last else None,
+                               }})
         if u.path == "/api/peers":
             with self.node.lock:
                 rows = [{"node_id": v.get("node_id"), "vip": k,
@@ -477,6 +521,8 @@ def main():
     ap.add_argument("--ui-port", type=int, default=32441)
     ap.add_argument("--room", default="public-lobby")
     ap.add_argument("--signal", default="")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="do not auto-open the UI page in a browser")
     args = ap.parse_args()
 
     n = Node(args)
@@ -490,10 +536,18 @@ def main():
     threading.Thread(target=n.keepalive_loop, daemon=True).start()
 
     srv = ThreadingHTTPServer(("127.0.0.1", args.ui_port), UIHandler)
+    url = f"http://127.0.0.1:{args.ui_port}"
     print(f"[lanlink] node {n.name} vip={n.vip} room={n.room} "
-          f"mesh=:{args.mesh_port} ui=http://127.0.0.1:{args.ui_port}")
+          f"mesh=:{args.mesh_port} ui={url}")
     print(f"[tun-stub] userspace mode (no Admin needed). "
           f"Go build + '-tun' as Admin attaches the real adapter.")
+    if not args.no_browser:
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            print(f"[ui] opened {url} in your browser")
+        except Exception as e:
+            print(f"[ui] could not open a browser ({e}) — open {url} yourself")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -18,10 +18,12 @@ async function refresh() {
     $("vip").textContent = s.vip || "…";
     $("room").textContent = s.room || "…";
     $("tun").textContent = s.tun || "…";
-    $("pub").textContent = s.public || "LAN only";
+    $("pub").textContent = s.public || "LAN only (same Wi-Fi is fine)";
+    renderNetHelp(s.discovery || {}, 0);
     const p = await api("/api/peers");
     const rows = p.peers || [];
     $("peerCount").textContent = rows.length;
+    renderNetHelp(s.discovery || {}, rows.length);
     const tb = $("peers");
     tb.innerHTML = "";
     if (!rows.length) {
@@ -69,3 +71,20 @@ $("joinBtn").onclick = async () => {
 $("refreshBtn").onclick = refresh;
 setInterval(refresh, 4000);
 refresh();
+
+// Explains in plain words why no players are visible yet.
+function renderNetHelp(d, peerCount) {
+  const el = $("nethelp");
+  if (peerCount > 0) { el.innerHTML = ""; return; }
+  const sent = d.hellos_sent || 0, heard = d.players_heard || 0;
+  let html = `<p>🔍 Searching for players… (announcements sent: <b>${sent}</b> · players heard: <b>${heard}</b>)</p>`;
+  if (sent >= 2 && heard === 0) {
+    html += `<p>⚠️ Nobody answers. Check, in order:` +
+      `<br>1. All PCs on the <b>same Wi-Fi</b>? (Different houses need internet + a meeting-point address in <code>start-player.bat</code>.)` +
+      `<br>2. Windows firewall: allow <b>LANLink.exe</b> (or Python) on <b>Private networks</b>. This blocks most people!` +
+      `<br>3. Same <b>room code</b> for the Ping to work (players still appear without it).</p>`;
+  } else if (heard > 0) {
+    html += `<p>👂 Announcements heard but no players listed yet — they should appear within seconds. If not, firewalls are eating the replies (see step 2 above).</p>`;
+  }
+  el.innerHTML = html;
+}

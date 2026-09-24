@@ -130,7 +130,7 @@ try:
              ("Stranger", 32447, 32448, "OTHER-99")]
     for name, mp, up, room in nodes:
         spawn("py/lanlink.py", "--name", name, "--mesh-port", str(mp),
-              "--ui-port", str(up), "--room", room,
+              "--ui-port", str(up), "--room", room, "--no-browser",
               "--signal", "http://127.0.0.1:32440")
     ok = wait_up("http://127.0.0.1:32440/health", "signaling")
     for _, _, up, _ in nodes:
@@ -144,6 +144,11 @@ try:
     check("all nodes have 10.242.x.y VIPs",
           all(x.startswith("10.242.") for x in v.values()), str(v))
     check("VIPs unique", len(set(v.values())) == 4, str(v))
+    check("discovery counters published + heard peers",
+          all(s.get("discovery", {}).get("hellos_sent", 0) > 0
+              and s.get("discovery", {}).get("players_heard", 0) > 0
+              for s in st.values()),
+          str({u: s.get("discovery") for u, s in st.items()}))
     check("STUN public endpoints resolved",
           all(s.get("public") for s in st.values()),
           str({u: s.get("public") for u, s in st.items()}))
