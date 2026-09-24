@@ -18,7 +18,8 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lanlink import (seal, open_frame, room_key, alloc_vip,
-                      parse_stun_response, T_PING, Node, GAME_PORTS, VERSION)
+                      parse_stun_response, T_PING, Node, GAME_PORTS, VERSION,
+                      check_signal)
 
 PASS, FAIL = 0, 0
 
@@ -100,6 +101,14 @@ ver = subprocess.run([sys.executable, "py/lanlink.py", "--version"],
                      cwd=os.path.dirname(HERE), capture_output=True, text=True)
 check("version flag reports build", "LANLink " + VERSION in (ver.stdout + ver.stderr),
       (ver.stdout + ver.stderr).strip())
+check("signal validator flags placeholder",
+      "EXAMPLE" in check_signal("http://host-ip:32440/").upper(),
+      check_signal("http://host-ip:32440/"))
+check("signal validator accepts empty (same-WiFi)", check_signal("") == "")
+check("signal validator accepts real IP",
+      check_signal("http://127.0.0.1:32440") == "")
+check("signal validator rejects unresolvable host",
+      check_signal("http://no-such-host-xyz123:32440") != "")
 
 # auto-detect: occupy a well-known game port -> node must report a server
 probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

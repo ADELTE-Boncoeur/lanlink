@@ -121,6 +121,8 @@ extra libraries. Share its `https://...` address as the signaling server.
 | No players appear after 30 s | Everyone on same Room Code (capitals matter); firewall allowed; same signaling server address |
 | Ping button says `timeout` | Firewall blocked it — allow Python; both players keep the window open |
 | `address already in use` | An old window is still running — close black windows, wait 10 s, retry |
+| `unrecognized arguments: --serve` | Your `LANLink.exe` is older than your `.bat` — re-download the exe from GitHub (the launcher prints the version: you want v1.2.0+) |
+| Typed `http://host-ip:32440` / `ERR_NAME_NOT_RESOLVED` | `host-ip` is only an EXAMPLE, not an address! Same Wi-Fi → leave it **empty** (press Enter). Internet → type the host friend's **real** numbers |
 | Game can't find the host | Join with the host's **virtual** IP (`10.242.x.y` from the page), not their normal IP; host must use the game's LAN mode |
 | Strangers in the room | Change the Room Code — it's the password |
 

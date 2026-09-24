@@ -39,6 +39,32 @@ VERSION = "1.2.0"
 GAME_PORTS = {28960: "CoD4", 28961: "CoD MW2", 2302: "Halo", 27015: "Source game"}
 
 
+def check_signal(url: str):
+    """Validate --signal early with a beginner-friendly error. Returns "" if OK."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        host = ""
+    if not host:
+        return (f"[signal] '{url}' has no address in it.\n"
+                f"  Same Wi-Fi? Leave the signaling server EMPTY (just press Enter).\n"
+                f"  Internet? Use the host's real address, e.g. http://192.168.1.5:32440")
+    if host.lower() in ("host-ip", "hostname", "your-ip", "server-ip", "example", "test"):
+        return (f"[signal] '{host}' is only an EXAMPLE — it is not a real address.\n"
+                f"  Same Wi-Fi? Leave it EMPTY (just press Enter).\n"
+                f"  Internet? Ask the friend running LANLink-Server.exe for their real IP.")
+    try:
+        socket.getaddrinfo(host, None)
+    except OSError:
+        return (f"[signal] could not find any computer called '{host}'.\n"
+                f"  Check the spelling, keep the host's black server window open,\n"
+                f"  and remember: same Wi-Fi needs NO address at all — leave it empty.")
+    return ""
+
+
 def room_key(room: str) -> bytes:
     room = (room or "public-lobby").lower()
     return hashlib.sha256(("lanlink-v1:" + room).encode()).digest()
@@ -596,6 +622,12 @@ def main():
                     help='announce a hosted game, e.g. --serve "CoD4 mp_shipment"')
     ap.add_argument("--version", action="version", version="LANLink " + VERSION)
     args = ap.parse_args()
+
+    err = check_signal(args.signal)
+    if err:
+        print(err)
+        print("Nothing was started. Fix the address above and run again.")
+        sys.exit(2)
 
     n = Node(args)
     UIHandler.node = n

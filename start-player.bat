@@ -9,7 +9,17 @@ if exist "%~dp0LANLink.exe" (
 )
 set /p NAME="Your name (e.g. Karim): "
 set /p ROOM="Room code - same for all friends (e.g. HALO-42): "
-set /p SIGNAL="Signaling server - Enter for same-WiFi, or http://HOST-IP:32440 : "
+:asksignal
+set /p SIGNAL="Signaling server - press Enter for same-WiFi, or type the HOST's real address: "
+echo %SIGNAL% | findstr /i "HOST-IP HOSTNAME YOUR-IP EXAMPLE SERVER-IP" >nul
+if not errorlevel 1 (
+  echo.
+  echo   "HOST-IP" is only an EXAMPLE - it is not a real address!
+  echo   Same Wi-Fi? Just press Enter and leave it empty.
+  echo   Internet? Ask your friend for their real numbers.
+  echo.
+  goto asksignal
+)
 set /p SERVE="Hosting a game? Type its name so friends SEE it (e.g. CoD4 Shipment) or just press Enter: "
 echo.
 if exist "%~dp0LANLink.exe" (
