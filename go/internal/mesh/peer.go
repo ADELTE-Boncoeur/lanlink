@@ -14,7 +14,9 @@ import (
 type Peer struct {
 	NodeID   string
 	VIP      net.IP
-	Primary  *net.UDPAddr            // best-known endpoint
+	Primary  *net.UDPAddr            // best-known endpoint (subnet-aware, see pick)
+	Last     *net.UDPAddr            // most recently learned candidate
+	Order    []string                // candidate keys in learn order (deterministic)
 	Cands    map[string]*net.UDPAddr // every known endpoint: "ip:port" -> addr
 	CandSrc  map[string]string       // "lan" | "signal" | "mesh" per candidate
 	Room     string                  // last advertised room code ("" = unknown)
@@ -48,6 +50,9 @@ func (t *Table) Learn(selfVIP net.IP, p *Peer) bool {
 			if src, ok := p.CandSrc[p.Primary.String()]; !ok || src == "" {
 				p.CandSrc[p.Primary.String()] = "mesh"
 			}
+			p.Order = append(p.Order, p.Primary.String())
+			p.Last = p.Primary
+			p.Primary = pickPrimary(p)
 		}
 		p.LastSeen = time.Now()
 		t.peers[k] = p
@@ -71,21 +76,123 @@ func (t *Table) Learn(selfVIP net.IP, p *Peer) bool {
 			old.Cands = map[string]*net.UDPAddr{}
 			old.CandSrc = map[string]string{}
 		}
+		if _, dup := old.Cands[ck]; !dup {
+			old.Order = append(old.Order, ck)
+		}
 		old.Cands[ck] = p.Primary
 		if src != "" {
 			old.CandSrc[ck] = src
 		}
-		// LAN/direct candidates always win; newest of the same class wins.
-		if isLAN(p.Primary.IP.String()) && !isLANAddr(old.Primary) {
-			old.Primary = p.Primary
-		} else if isLAN(p.Primary.IP.String()) == isLANAddr(old.Primary) {
-			old.Primary = p.Primary
-		}
+		old.Last = p.Primary
+		old.Primary = pickPrimary(old)
 	}
 	if p.RTTms != 0 {
 		old.RTTms = p.RTTms
 	}
 	return true
+}
+
+// pickPrimary prefers a candidate on OUR subnet (fixes multi-homed PCs that
+// announce an unreachable hotspot/VM address), then any LAN address, then
+// anything. Newest-learned wins inside the best class.
+func pickPrimary(p *Peer) *net.UDPAddr {
+	ordered := []*net.UDPAddr{}
+	for _, k := range p.Order {
+		if a, ok := p.Cands[k]; ok {
+			ordered = append(ordered, a)
+		}
+	}
+	for _, a := range p.Cands {
+		found := false
+		for _, b := range ordered {
+			if a.String() == b.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ordered = append(ordered, a)
+		}
+	}
+	nets := ourSubnets()
+	var same, lan []*net.UDPAddr
+	for _, a := range ordered {
+		if nets[net24(a.IP.String())] {
+			same = append(same, a)
+		} else if isLAN(a.IP.String()) {
+			lan = append(lan, a)
+		}
+	}
+	for _, pool := range [][]*net.UDPAddr{same, lan, ordered} {
+		if len(pool) == 0 {
+			continue
+		}
+		if p.Last != nil {
+			for _, a := range pool {
+				if a.String() == p.Last.String() {
+					return a
+				}
+			}
+		}
+		return pool[len(pool)-1]
+	}
+	return p.Primary
+}
+
+var (
+	subnetCache     map[string]bool
+	subnetCacheTime time.Time
+	subnetCacheMu   sync.Mutex
+)
+
+// ourSubnets returns our /24s (cached 60s). Offline-safe.
+func ourSubnets() map[string]bool {
+	subnetCacheMu.Lock()
+	defer subnetCacheMu.Unlock()
+	if subnetCache != nil && time.Since(subnetCacheTime) < time.Minute {
+		return subnetCache
+	}
+	out := map[string]bool{}
+	if ifs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range ifs {
+			if ipnet, ok := a.(*net.IPNet); ok {
+				if v4 := ipnet.IP.To4(); v4 != nil && !v4.IsLoopback() {
+					out[net24(v4.String())] = true
+				}
+			}
+		}
+	}
+	subnetCache = out
+	subnetCacheTime = time.Now()
+	return out
+}
+
+func net24(ip string) string {
+	parts := splitIP(ip)
+	if len(parts) != 4 {
+		return ""
+	}
+	return parts[0] + "." + parts[1] + "." + parts[2]
+}
+
+func splitIP(ip string) []string {
+	var out []string
+	cur := ""
+	for i := 0; i < len(ip); i++ {
+		if ip[i] == '.' {
+			out = append(out, cur)
+			cur = ""
+		} else {
+			cur += string(ip[i])
+		}
+	}
+	return append(out, cur)
+}
+
+// SameLAN reports whether ip shares one of our /24 subnets.
+func SameLAN(ip string) bool {
+	n := net24(ip)
+	return n != "" && ourSubnets()[n]
 }
 
 // Candidates returns primary first, then the rest (happy-eyeballs order).
@@ -111,7 +218,7 @@ func isLANAddr(a *net.UDPAddr) bool {
 }
 
 func isLAN(ip string) bool {
-	for _, p := range []string{"10.", "192.168.", "172.16.", "127."} {
+	for _, p := range []string{"10.", "192.168.", "172.16.", "127.", "169.254."} {
 		if len(ip) >= len(p) && ip[:len(p)] == p {
 			return true
 		}

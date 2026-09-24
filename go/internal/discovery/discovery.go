@@ -36,12 +36,30 @@ const (
 
 // Hello is the presence announcement.
 type Hello struct {
-	Magic    string `json:"magic"`
-	NodeID   string `json:"node_id"`
-	VIP      string `json:"vip"`
-	MeshPort int    `json:"mesh_port"`
-	Room     string `json:"room"`
-	Ts       int64  `json:"ts"`
+	Magic    string   `json:"magic"`
+	NodeID   string   `json:"node_id"`
+	VIP      string   `json:"vip"`
+	MeshPort int      `json:"mesh_port"`
+	Room     string   `json:"room"`
+	Ips      []string `json:"ips,omitempty"` // all our LAN IPs (multi-homed PCs)
+	Ts       int64    `json:"ts"`
+}
+
+// LocalIPs returns our non-loopback IPv4 addresses (offline-safe).
+func LocalIPs() []string {
+	var out []string
+	ifs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, a := range ifs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			if v4 := ipnet.IP.To4(); v4 != nil && !v4.IsLoopback() {
+				out = append(out, v4.String())
+			}
+		}
+	}
+	return out
 }
 
 // NodeID generates a short random id like "pc-a3f9".

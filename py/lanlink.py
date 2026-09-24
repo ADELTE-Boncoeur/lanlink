@@ -184,6 +184,8 @@ class Node:
         self.games = {}  # vip -> {title, node_id, seen} (game servers on the mesh)
         self.auto_game = ""  # auto-detected local game server (no typing needed)
         self._tick = 0
+        self._ips_cache = []  # our local IPv4s (multi-homed PCs have several)
+        self._ips_at = 0.0
         self.seq = random.randint(1, 1 << 30)
         self.pending = {}
         self._stun_txn = None
@@ -201,10 +203,88 @@ class Node:
     @staticmethod
     def _is_lan(ip: str) -> bool:
         return (ip.startswith("10.") or ip.startswith("192.168.")
-                or ip.startswith("172.16.") or ip.startswith("127."))
+                or ip.startswith("172.16.") or ip.startswith("127.")
+                or ip.startswith("169.254."))  # link-local / APIPA / PAN-style
+
+    def _local_ips(self):
+        """All our IPv4 addresses (a PC can have Wi-Fi + hotspot + VM nets).
+        Offline-safe: connect() sends nothing, getaddrinfo needs no network."""
+        now = time.time()
+        if now - self._ips_at < 60 and self._ips_cache:
+            return self._ips_cache
+        ips = set()
+        try:
+            for fam, _, _, _, sa in socket.getaddrinfo(socket.gethostname(), None,
+                                                       socket.AF_INET):
+                if sa[0] and not sa[0].startswith("127."):
+                    ips.add(sa[0])
+        except Exception:
+            pass
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("192.0.2.1", 9))
+            if not s.getsockname()[0].startswith("127."):
+                ips.add(s.getsockname()[0])
+            s.close()
+        except Exception:
+            pass
+        self._ips_cache = sorted(ips)
+        self._ips_at = now
+        return self._ips_cache
+
+    @staticmethod
+    def _net24(ip: str) -> str:
+        p = (ip or "").split(".")
+        return ".".join(p[:3]) if len(p) == 4 else ""
+
+    def _pick_primary(self, e):
+        """Best candidate: one on OUR subnet first (fixes multi-homed PCs
+        announcing an unreachable hotspot/VM address), else any LAN address,
+        else whatever we have. Newest-learned wins inside the best class."""
+        cands = list(e["cands"])
+        if not cands:
+            return e.get("primary")
+        mine = {self._net24(i) for i in self._local_ips()}
+        mine.discard("")
+        same = [c for c in cands if self._net24(c[0]) in mine]
+        lan = [c for c in cands if self._is_lan(c[0])]
+        for pool in (same, lan, cands):
+            if pool:
+                if e.get("last") in pool:
+                    return e["last"]
+                return pool[-1]
+        return cands[0]
+
+    @staticmethod
+    def candidates_from_hello(h, frm_ip, mesh_port):
+        """Every address a peer claims, sender first: [(ip, port)]. Filters
+        junk/loopback so one bad hello can't poison the table."""
+        out = []
+        seen = set()
+
+        def add(ip, port):
+            try:
+                socket.inet_aton(ip)
+            except (OSError, TypeError):
+                return
+            if ip.startswith("127.") or (ip, port) in seen:
+                return
+            seen.add((ip, port))
+            out.append((ip, int(port)))
+
+        try:
+            mp = int(mesh_port)
+        except (TypeError, ValueError):
+            return out
+        if not mp:
+            return out
+        add(frm_ip, mp)  # the address we actually received it from — most trusted
+        for ip in h.get("ips", []) or []:
+            add(ip, mp)
+        return out
 
     def learn_peer(self, vip, node_id, ep, src, room=""):
-        """Add endpoint candidate; LAN/direct candidates always win as primary."""
+        """Add endpoint candidate; subnet-aware primary (see _pick_primary)."""
         if not vip or vip == self.vip:
             return
         ep = (ep[0], int(ep[1]))
@@ -212,7 +292,8 @@ class Node:
             e = self.peers.get(vip)
             if e is None:
                 e = {"node_id": node_id or "", "cands": {}, "primary": ep,
-                     "rtt": 0.0, "seen": time.time(), "room": room or ""}
+                     "rtt": 0.0, "seen": time.time(), "room": room or "",
+                     "last": ep}
                 self.peers[vip] = e
             if node_id:
                 e["node_id"] = node_id
@@ -220,11 +301,13 @@ class Node:
                 e["room"] = room
             e["cands"][ep] = src
             e["seen"] = time.time()
-            cur = e["primary"]
-            if self._is_lan(ep[0]) and not self._is_lan(cur[0]):
-                e["primary"] = ep
-            elif self._is_lan(ep[0]) == self._is_lan(cur[0]):
-                e["primary"] = ep  # newest of same class wins
+            e["last"] = ep
+            e["primary"] = self._pick_primary(e) or ep
+
+    def same_lan(self, ip: str) -> bool:
+        """True if ip shares one of our /24 subnets (direct CoD connect works)."""
+        net = self._net24(ip)
+        return bool(net) and any(self._net24(i) == net for i in self._local_ips())
 
     def _cands(self, vip):
         with self.lock:
@@ -264,7 +347,10 @@ class Node:
                 with self.lock:
                     return self.peers.get(vip, {}).get("rtt", 0.0)
         self.pending.pop(seq, None)
-        raise TimeoutError("ping timeout")
+        tried = ", ".join(f"{ip}:{port}" for ip, port in cands)
+        raise TimeoutError(
+            f"no reply from {tried} — target blocks UDP (firewall?) or sits "
+            f"on an unreachable network (different subnet/VPN?)")
 
     def mesh_loop(self):
         while True:
@@ -307,6 +393,7 @@ class Node:
                         with self.lock:
                             self.games[src] = {"title": title,
                                                "node_id": info.get("node", ""),
+                                               "lan": info.get("lan", ""),
                                                "seen": time.time()}
                         print(f"[lobby] game server '{title}' @ {src}")
                 except Exception:
@@ -349,9 +436,11 @@ class Node:
             if rvip == self.vip:
                 print(f"[discovery] VIP clash on {rvip} — staying (salt bump in Go build)")
                 continue
-            self.learn_peer(rvip, h.get("node_id", ""), ep, "lan", h.get("room", ""))
+            for cand in self.candidates_from_hello(h, frm[0], rp):
+                self.learn_peer(rvip, h.get("node_id", ""), cand, "lan",
+                                h.get("room", ""))
             print(f"[discovery] LAN peer {h.get('node_id')} ({rvip}) via {ep[0]}:{ep[1]}")
-            self.punch(ep)
+            self.punch_peer(rvip)
 
     def _bcast_targets(self):
         """Global + subnet-directed broadcast addresses.
@@ -379,6 +468,7 @@ class Node:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         hello = lambda: json.dumps({"magic": "LLNK", "node_id": self.name, "vip": self.vip,
                                     "mesh_port": self.mesh_port, "room": self.room,
+                                    "ips": self._local_ips(),
                                     "ts": int(time.time())}).encode()
 
         def burst():
@@ -477,8 +567,9 @@ class Node:
                 self.punch_peer(vip)  # hold every NAT mapping open
             title = self.serve_title or self.auto_game
             if title:  # announce our hosted game to the whole mesh
+                lan = (self._local_ips() or [""])[0]
                 payload = json.dumps({"title": title, "node": self.name,
-                                      "vip": self.vip}).encode()
+                                      "vip": self.vip, "lan": lan}).encode()
                 for vip in vips:
                     for ep in self._cands(vip):
                         try:
@@ -555,12 +646,15 @@ class UIHandler(BaseHTTPRequestHandler):
                          "endpoint": f"{v['primary'][0]}:{v['primary'][1]}",
                          "source": v["cands"].get(v["primary"], ""),
                          "cands": len(v["cands"]), "room": v.get("room", ""),
+                         "same_lan": self.node.same_lan(v["primary"][0]),
                          "rtt_ms": v.get("rtt", 0.0)}
                         for k, v in self.node.peers.items()]
             return self._json({"peers": rows})
         if u.path == "/api/games":
             with self.node.lock:
                 rows = [{"vip": k, "title": g["title"], "node_id": g.get("node_id", ""),
+                         "lan": g.get("lan", ""),
+                         "same_lan": self.node.same_lan(g.get("lan", "")),
                          "seen_s_ago": round(time.time() - g["seen"], 1)}
                         for k, g in self.node.games.items()]
             return self._json({"games": rows})

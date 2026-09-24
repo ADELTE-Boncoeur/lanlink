@@ -43,9 +43,10 @@ async function refresh() {
       if (mismatch) strangers++;
       const tr = document.createElement("tr");
       if (mismatch) tr.style.opacity = "0.55";
-      const rtt = r.rtt_ms ? r.rtt_ms.toFixed(0) + " ms" : "—";
+      const rtt = !r.rtt_ms ? "—" : (r.rtt_ms < 1 ? "&lt;1 ms" : r.rtt_ms.toFixed(0) + " ms");
+      const sameTag = r.same_lan ? '<br><span style="background:#238636;border-radius:10px;padding:0 8px;font-size:11px">same Wi-Fi ✓ direct play works</span>' : "";
       tr.innerHTML = `<td>${r.node_id || "?"}</td><td class="mono">${r.vip}</td>` +
-        `<td class="mono">${r.endpoint || ""}</td><td>${r.source || ""}</td>` +
+        `<td class="mono">${r.endpoint || ""}${sameTag}</td><td>${r.source || ""}</td>` +
         `<td class="mono">${escapeHtml(rRoom) || "?"}</td><td>${rtt}</td>`;
       const td = document.createElement("td");
       const b = document.createElement("button");
@@ -98,8 +99,10 @@ function renderGames(games) {
   }
   for (const g of games) {
     const tr = document.createElement("tr");
+    const join = `<span class="mono">${g.vip}</span>` + ((g.same_lan && g.lan)
+      ? `<br><span style="color:#8b949e;font-size:12px">same Wi-Fi — or connect direct: <span class="mono">${escapeHtml(g.lan)}</span></span>` : "");
     tr.innerHTML = `<td>${escapeHtml(g.title || "?")}</td>` +
-      `<td>${escapeHtml(g.node_id || "?")}</td><td class="mono">${g.vip}</td>`;
+      `<td>${escapeHtml(g.node_id || "?")}</td><td>${join}</td>`;
     const td = document.createElement("td");
     const b = document.createElement("button");
     b.textContent = "Copy IP";

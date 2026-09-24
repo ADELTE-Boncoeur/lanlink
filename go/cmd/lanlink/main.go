@@ -55,7 +55,16 @@ type node struct {
 type gameEntry struct {
 	Title  string
 	NodeID string
+	LAN    string
 	Seen   time.Time
+}
+
+func hostOf(ep string) string {
+	h, _, err := net.SplitHostPort(ep)
+	if err != nil {
+		return ep
+	}
+	return h
 }
 
 func main() {
@@ -102,16 +111,28 @@ func main() {
 	}
 
 	// Part C: LAN discovery — learn peers, punch immediately.
-	discHello := discovery.Hello{NodeID: nodeID, VIP: vip.String(), MeshPort: *meshPort, Room: *room}
+	discHello := discovery.Hello{NodeID: nodeID, VIP: vip.String(), MeshPort: *meshPort, Room: *room, Ips: discovery.LocalIPs()}
 	disc, err := discovery.Start(discHello, func(h discovery.Hello, from *net.UDPAddr) {
 		rvip := net.ParseIP(h.VIP)
 		if rvip == nil {
 			return
 		}
 		ep := &net.UDPAddr{IP: from.IP, Port: h.MeshPort}
-		n.peers.Learn(n.vip, &mesh.Peer{NodeID: h.NodeID, VIP: rvip, Primary: ep,
-			Cands: map[string]*net.UDPAddr{ep.String(): ep},
-			CandSrc: map[string]string{ep.String(): "lan"}, Room: h.Room})
+		learn := func(addr *net.UDPAddr, src string) {
+			n.peers.Learn(n.vip, &mesh.Peer{NodeID: h.NodeID, VIP: rvip, Primary: addr,
+				Cands: map[string]*net.UDPAddr{addr.String(): addr},
+				CandSrc: map[string]string{addr.String(): src}, Room: h.Room})
+		}
+		learn(ep, "lan")
+		mine := map[string]bool{}
+		for _, ip := range discovery.LocalIPs() {
+			mine[ip] = true
+		}
+		for _, ip := range h.Ips { // every address the peer claims (multi-homed)
+			if pip := net.ParseIP(ip); pip != nil && !pip.IsLoopback() && !mine[ip] {
+				learn(&net.UDPAddr{IP: pip, Port: h.MeshPort}, "lan")
+			}
+		}
 		n.punchAddr(ep) // open NAT/stateful-firewall path back immediately
 		log.Printf("LAN peer: %s (%s) via %s room=%s", h.NodeID, h.VIP, ep, h.Room)
 	})
@@ -188,13 +209,14 @@ func (n *node) meshRecvLoop() {
 			var info struct {
 				Title string `json:"title"`
 				Node  string `json:"node"`
+				LAN   string `json:"lan"`
 			}
 			if err := json.Unmarshal(pt, &info); err == nil && info.Title != "" {
 				if len(info.Title) > 64 {
 					info.Title = info.Title[:64]
 				}
 				n.gamesMu.Lock()
-				n.games[h.Src.String()] = gameEntry{Title: info.Title, NodeID: info.Node, Seen: time.Now()}
+				n.games[h.Src.String()] = gameEntry{Title: info.Title, NodeID: info.Node, LAN: info.LAN, Seen: time.Now()}
 				n.gamesMu.Unlock()
 				log.Printf("lobby: game server '%s' @ %s", info.Title, h.Src)
 			}
@@ -271,8 +293,12 @@ func (n *node) keepaliveLoop() {
 			title = detectLocalGame()
 		}
 		if title != "" { // announce our hosted game to the whole mesh
+			lan := ""
+			if ips := discovery.LocalIPs(); len(ips) > 0 {
+				lan = ips[0]
+			}
 			payload, _ := json.Marshal(map[string]string{
-				"title": title, "node": n.nodeID, "vip": n.vip.String()})
+				"title": title, "node": n.nodeID, "vip": n.vip.String(), "lan": lan})
 			for _, p := range n.peers.All() {
 				for _, ep := range p.Candidates() {
 					frame := mesh.Seal(n.roomKey, n.vip, p.VIP, mesh.TypeLobby, n.nextSeq(), payload)
@@ -329,7 +355,14 @@ func (n *node) PingPeer(vip net.IP, timeout time.Duration) (float64, error) {
 	n.pendMu.Lock()
 	delete(n.pending, seq)
 	n.pendMu.Unlock()
-	return 0, fmt.Errorf("ping timeout")
+	tried := ""
+	for i, ep := range cands {
+		if i > 0 {
+			tried += ", "
+		}
+		tried += ep.String()
+	}
+	return 0, fmt.Errorf("no reply from %s — target blocks UDP (firewall?) or sits on an unreachable network", tried)
 }
 
 // ---------------------------------------------------------------- signaling
@@ -408,6 +441,7 @@ func (n *node) uiMux() *http.ServeMux {
 			Endpoint string  `json:"endpoint"`
 			Source   string  `json:"source"`
 			Room     string  `json:"room"`
+			SameLAN  bool    `json:"same_lan"`
 			Cands    int     `json:"cands"`
 			RTTms    float64 `json:"rtt_ms"`
 		}
@@ -418,7 +452,7 @@ func (n *node) uiMux() *http.ServeMux {
 				ep = p.Primary.String()
 				src = p.CandSrc[ep]
 			}
-			rows = append(rows, row{p.NodeID, p.VIP.String(), ep, src, p.Room, len(p.Cands), p.RTTms})
+			rows = append(rows, row{p.NodeID, p.VIP.String(), ep, src, p.Room, mesh.SameLAN(hostOf(ep)), len(p.Cands), p.RTTms})
 		}
 		writeJSON(w, map[string]any{"peers": rows})
 	})
@@ -427,12 +461,14 @@ func (n *node) uiMux() *http.ServeMux {
 			VIP      string  `json:"vip"`
 			Title    string  `json:"title"`
 			NodeID   string  `json:"node_id"`
+			LAN      string  `json:"lan"`
+			SameLAN  bool    `json:"same_lan"`
 			SeenSAgo float64 `json:"seen_s_ago"`
 		}
 		rows := []row{}
 		n.gamesMu.Lock()
 		for vip, g := range n.games {
-			rows = append(rows, row{vip, g.Title, g.NodeID, time.Since(g.Seen).Seconds()})
+			rows = append(rows, row{vip, g.Title, g.NodeID, g.LAN, mesh.SameLAN(g.LAN), time.Since(g.Seen).Seconds()})
 		}
 		n.gamesMu.Unlock()
 		writeJSON(w, map[string]any{"games": rows})

@@ -125,6 +125,26 @@ if held_here:
     check("auto-detect quiet when ports free", Node.detect_local_game(None) == "",
           Node.detect_local_game(None))
 
+# multi-homed peer: hello carries a hotspot IP + a good LAN IP -> we must
+# shortlist both but prefer the one on OUR subnet (no sockets needed here)
+mk = Node.__new__(Node)
+mk.vip = "10.242.0.1"
+mk.peers = {}
+mk.lock = __import__("threading").Lock()
+mk._ips_cache = ["192.168.1.50"]
+mk._ips_at = 9999999999.0
+c = Node.candidates_from_hello(
+    {"ips": ["192.168.137.9", "bad", "127.0.0.1", "192.168.1.9"]},
+    "192.168.1.9", 32443)
+check("hello candidates: sender first, junk filtered",
+      c == [("192.168.1.9", 32443), ("192.168.137.9", 32443)], str(c))
+mk.learn_peer("10.242.0.2", "Bob", ("192.168.137.9", 32443), "signal", "R")
+mk.learn_peer("10.242.0.2", "Bob", ("192.168.1.9", 32443), "lan", "R")
+e = mk.peers["10.242.0.2"]
+check("primary prefers our subnet over hotspot net",
+      e["primary"] == ("192.168.1.9", 32443) and len(e["cands"]) == 2,
+      str(e["primary"]))
+
 # ---------------------------------------------------------------- live
 print("== LIVE: signaling + 4 nodes ==")
 procs = []
@@ -222,6 +242,12 @@ try:
     check("game server announced across mesh",
           any(g["vip"] == v[U1] and "CoD4" in g.get("title", "") for g in bg),
           str(bg))
+    check("peers API flags same-LAN direct play",
+          all(p.get("same_lan") for up in (U1, U2, U3) for p in peers[up]
+              if p["vip"] != v[up]),
+          str(peers[U1]))
+    check("games API carries host LAN address",
+          all(g.get("lan") for g in bg), str(bg))
 
     # every pair in HALO-42 pings both ways through the encrypted mesh
     for a, b in [(U1, U2), (U1, U3), (U2, U3)]:
