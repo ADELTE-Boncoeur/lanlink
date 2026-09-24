@@ -20,6 +20,11 @@ async function refresh() {
     $("tun").textContent = s.tun || "…";
     $("pub").textContent = s.public || "LAN only (same Wi-Fi is fine)";
     renderNetHelp(s.discovery || {}, 0);
+    renderGames([]);
+    try {
+      const g = await api("/api/games");
+      renderGames(g.games || []);
+    } catch (e) { /* games optional on old nodes */ }
     const p = await api("/api/peers");
     const rows = p.peers || [];
     $("peerCount").textContent = rows.length;
@@ -71,6 +76,37 @@ $("joinBtn").onclick = async () => {
 $("refreshBtn").onclick = refresh;
 setInterval(refresh, 4000);
 refresh();
+
+// Game-server browser: shows hosted games announced over the mesh.
+function renderGames(games) {
+  $("gameCount").textContent = games.length;
+  const tb = $("games");
+  tb.innerHTML = "";
+  if (!games.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="empty">No game servers announced yet.</td></tr>';
+    return;
+  }
+  for (const g of games) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(g.title || "?")}</td>` +
+      `<td>${escapeHtml(g.node_id || "?")}</td><td class="mono">${g.vip}</td>`;
+    const td = document.createElement("td");
+    const b = document.createElement("button");
+    b.textContent = "Copy IP";
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(g.vip); log("copied " + g.vip + " — paste it in your game (CoD: connect " + g.vip + ")"); }
+      catch (e) { log("copy manually: " + g.vip); }
+    };
+    td.appendChild(b);
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
 // Explains in plain words why no players are visible yet.
 function renderNetHelp(d, peerCount) {

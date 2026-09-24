@@ -5,6 +5,7 @@
 //	UDP payload = HEADER(20) || CIPHERTEXT(n) || TAG(8)   // 28 bytes overhead
 //	HEADER = MAGIC u32be 0x4C4C4E4B | VER u8=1 | TYPE u8 | SRC u32be | DST u32be | SEQ u32be | LEN u16be
 //	TYPE: 0x01 DATA (raw IP packet from TUN)  0x02 PING  0x03 PONG  0x04 PUNCH
+//	      0x05 LOBBY (JSON game-server announcement {title,node,vip})
 //
 // Crypto (stdlib-only, low latency, portable):
 //	key      = SHA256(strings.ToLower(roomCode))
@@ -34,6 +35,7 @@ const (
 	TypePing  uint8 = 0x02
 	TypePong  uint8 = 0x03
 	TypePunch uint8 = 0x04
+	TypeLobby uint8 = 0x05
 
 	HeaderLen = 20
 	TagLen    = 8

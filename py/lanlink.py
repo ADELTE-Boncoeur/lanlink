@@ -28,7 +28,7 @@ from urllib.parse import urlparse, parse_qs
 
 MAGIC = 0x4C4C4E4B
 VER = 1
-T_DATA, T_PING, T_PONG, T_PUNCH = 0x01, 0x02, 0x03, 0x04
+T_DATA, T_PING, T_PONG, T_PUNCH, T_LOBBY = 0x01, 0x02, 0x03, 0x04, 0x05
 HDLEN, TAGLEN = 20, 8
 BCAST_PORT = 32442
 
@@ -148,6 +148,8 @@ class Node:
         self.disc_sent = 0    # broadcast hellos transmitted (diagnostics)
         self.disc_heard = 0   # foreign hellos received (diagnostics)
         self.disc_last = None  # timestamp of last foreign hello
+        self.serve_title = (getattr(args, "serve", "") or "").strip()[:64]
+        self.games = {}  # vip -> {title, node_id, seen} (game servers on the mesh)
         self.seq = random.randint(1, 1 << 30)
         self.pending = {}
         self._stun_txn = None
@@ -261,6 +263,18 @@ class Node:
             elif ptype == T_DATA:
                 print(f"[tun-stub] DATA {src} -> {dst} ({len(pt)}B) "
                       f"(run Go build -tun as Admin for real injection)")
+            elif ptype == T_LOBBY:
+                try:
+                    info = json.loads(pt.decode())
+                    title = str(info.get("title", ""))[:64]
+                    if title:
+                        with self.lock:
+                            self.games[src] = {"title": title,
+                                               "node_id": info.get("node", ""),
+                                               "seen": time.time()}
+                        print(f"[lobby] game server '{title}' @ {src}")
+                except Exception:
+                    pass
 
     # ---------------- LAN discovery (Part C) ----------------
     def discovery_loop(self):
@@ -401,6 +415,20 @@ class Node:
                     del self.peers[k]
             for vip in vips:
                 self.punch_peer(vip)  # hold every NAT mapping open
+            if self.serve_title:  # announce our hosted game to the whole mesh
+                payload = json.dumps({"title": self.serve_title, "node": self.name,
+                                      "vip": self.vip}).encode()
+                for vip in vips:
+                    for ep in self._cands(vip):
+                        try:
+                            self.sock.sendto(seal(self.key, self.vip, vip, T_LOBBY,
+                                                  self.next_seq(), payload), ep)
+                        except Exception:
+                            pass
+            with self.lock:  # expire silent game servers
+                dead = [k for k, g in self.games.items() if time.time() - g["seen"] > 40]
+                for k in dead:
+                    del self.games[k]
 
     def refresh_public(self, stun_host="stun.l.google.com", stun_port=19302):
         """STUN binding request FROM the mesh socket, so the reply reveals
@@ -469,6 +497,12 @@ class UIHandler(BaseHTTPRequestHandler):
                          "rtt_ms": v.get("rtt", 0.0)}
                         for k, v in self.node.peers.items()]
             return self._json({"peers": rows})
+        if u.path == "/api/games":
+            with self.node.lock:
+                rows = [{"vip": k, "title": g["title"], "node_id": g.get("node_id", ""),
+                         "seen_s_ago": round(time.time() - g["seen"], 1)}
+                        for k, g in self.node.games.items()]
+            return self._json({"games": rows})
         # static frontend
         path = u.path.lstrip("/") or "index.html"
         fp = os.path.join(FRONTEND_DIR, path)
@@ -523,6 +557,8 @@ def main():
     ap.add_argument("--signal", default="")
     ap.add_argument("--no-browser", action="store_true",
                     help="do not auto-open the UI page in a browser")
+    ap.add_argument("--serve", default="",
+                    help='announce a hosted game, e.g. --serve "CoD4 mp_shipment"')
     args = ap.parse_args()
 
     n = Node(args)

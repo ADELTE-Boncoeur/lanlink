@@ -46,6 +46,16 @@ type node struct {
 	publicEP string
 	stunTxn  [12]byte
 	stunMu   sync.Mutex
+	serve    string // announced game-server title ("" = not hosting)
+	games    map[string]gameEntry
+	gamesMu  sync.Mutex
+}
+
+// gameEntry is one hosted game seen on the mesh.
+type gameEntry struct {
+	Title  string
+	NodeID string
+	Seen   time.Time
 }
 
 func main() {
@@ -56,6 +66,7 @@ func main() {
 	signalURL := flag.String("signal", "", "signaling server URL, e.g. http://host:32440 (empty = LAN only)")
 	useTun := flag.Bool("tun", false, "attach real TUN adapter (needs Admin + wintun/tap driver)")
 	stun := flag.String("stun", "stun.l.google.com:19302", "STUN server for public endpoint (empty = skip)")
+	serve := flag.String("serve", "", "announce a hosted game, e.g. -serve \"CoD4 mp_shipment\"")
 	flag.Parse()
 
 	nodeID := *name
@@ -82,6 +93,7 @@ func main() {
 		roomKey:  mesh.RoomKey(*room),
 		meshConn: mconn, peers: mesh.NewTable(),
 		tunif: tunif, pending: map[uint32]time.Time{},
+		serve: *serve, games: map[string]gameEntry{},
 	}
 	if *signalURL != "" {
 		n.signal = signaling.NewClient(*signalURL, *room, nodeID, vip, *meshPort)
@@ -172,6 +184,20 @@ func (n *node) meshRecvLoop() {
 			_ = n.tunif.Write(pt) // inject into OS (stub queues locally)
 		case mesh.TypePunch:
 			// NAT mapping opened — nothing else needed.
+		case mesh.TypeLobby:
+			var info struct {
+				Title string `json:"title"`
+				Node  string `json:"node"`
+			}
+			if err := json.Unmarshal(pt, &info); err == nil && info.Title != "" {
+				if len(info.Title) > 64 {
+					info.Title = info.Title[:64]
+				}
+				n.gamesMu.Lock()
+				n.games[h.Src.String()] = gameEntry{Title: info.Title, NodeID: info.Node, Seen: time.Now()}
+				n.gamesMu.Unlock()
+				log.Printf("lobby: game server '%s' @ %s", info.Title, h.Src)
+			}
 		}
 	}
 }
@@ -225,6 +251,23 @@ func (n *node) keepaliveLoop() {
 				n.punchAddr(ep)
 			}
 		}
+		if n.serve != "" { // announce our hosted game to the whole mesh
+			payload, _ := json.Marshal(map[string]string{
+				"title": n.serve, "node": n.nodeID, "vip": n.vip.String()})
+			for _, p := range n.peers.All() {
+				for _, ep := range p.Candidates() {
+					frame := mesh.Seal(n.roomKey, n.vip, p.VIP, mesh.TypeLobby, n.nextSeq(), payload)
+					_, _ = n.meshConn.WriteToUDP(frame, ep)
+				}
+			}
+		}
+		n.gamesMu.Lock()
+		for k, g := range n.games {
+			if time.Since(g.Seen) > 40*time.Second {
+				delete(n.games, k)
+			}
+		}
+		n.gamesMu.Unlock()
 		n.peers.Prune(90 * time.Second)
 	}
 }
@@ -358,6 +401,21 @@ func (n *node) uiMux() *http.ServeMux {
 			rows = append(rows, row{p.NodeID, p.VIP.String(), ep, src, len(p.Cands), p.RTTms})
 		}
 		writeJSON(w, map[string]any{"peers": rows})
+	})
+	mux.HandleFunc("/api/games", func(w http.ResponseWriter, r *http.Request) {
+		type row struct {
+			VIP      string  `json:"vip"`
+			Title    string  `json:"title"`
+			NodeID   string  `json:"node_id"`
+			SeenSAgo float64 `json:"seen_s_ago"`
+		}
+		rows := []row{}
+		n.gamesMu.Lock()
+		for vip, g := range n.games {
+			rows = append(rows, row{vip, g.Title, g.NodeID, time.Since(g.Seen).Seconds()})
+		}
+		n.gamesMu.Unlock()
+		writeJSON(w, map[string]any{"games": rows})
 	})
 	mux.HandleFunc("/api/room", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

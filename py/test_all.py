@@ -122,17 +122,43 @@ def wait_up(url, label, tries=30):
     return False
 
 
+B = 32440  # base port; override with: python py\test_all.py --base=32540
+for _a in sys.argv[1:]:
+    if _a.startswith("--base="):
+        B = int(_a.split("=", 1)[1])
+SIG, M1, U1, M2, U2, M3, U3, M4, U4 = B, B + 3, B + 1, B + 4, B + 2, B + 5, B + 6, B + 7, B + 8
+
+# Preflight: refuse to test against a stranger's ports (a stale LANLink
+# holding them would silently answer our HTTP checks and fake the results).
+def _free(port, udp=False):
+    import socket as _s
+    s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM if udp else _s.SOCK_STREAM)
+    try:
+        s.bind(("0.0.0.0" if udp else "127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+_taken = [p for p in (SIG, U1, U2, U3, U4) if not _free(p)]
+_taken += [p for p in (M1, M2, M3, M4) if not _free(p, udp=True)]
+if _taken:
+    print(f"ABORT: ports already in use {_taken} — close old LANLink windows or use --base=NNNNN")
+    sys.exit(2)
 try:
-    spawn("py/signaling.py", "--port", "32440")
-    nodes = [("Alpha", 32443, 32441, "HALO-42"),
-             ("Bravo", 32444, 32442, "HALO-42"),
-             ("Coco", 32445, 32446, "HALO-42"),
-             ("Stranger", 32447, 32448, "OTHER-99")]
+    spawn("py/signaling.py", "--port", str(SIG))
+    nodes = [("Alpha", M1, U1, "HALO-42"),
+             ("Bravo", M2, U2, "HALO-42"),
+             ("Coco", M3, U3, "HALO-42"),
+             ("Stranger", M4, U4, "OTHER-99")]
     for name, mp, up, room in nodes:
+        extra = ["--serve", "CoD4 Test Server"] if name == "Alpha" else []
         spawn("py/lanlink.py", "--name", name, "--mesh-port", str(mp),
-              "--ui-port", str(up), "--room", room, "--no-browser",
-              "--signal", "http://127.0.0.1:32440")
-    ok = wait_up("http://127.0.0.1:32440/health", "signaling")
+              "--ui-port", str(up), "--room", room, "--no-browser", *extra,
+              "--signal", f"http://127.0.0.1:{SIG}")
+    ok = wait_up(f"http://127.0.0.1:{SIG}/health", "signaling")
     for _, _, up, _ in nodes:
         ok = wait_up(f"http://127.0.0.1:{up}/api/status", f"ui:{up}") and ok
     if not ok:
@@ -155,12 +181,18 @@ try:
 
     peers = {up: json.loads(get(f"http://127.0.0.1:{up}/api/peers")[1])["peers"]
              for _, _, up, _ in nodes}
-    for up in (32441, 32442, 32446):
+    for up in (U1, U2, U3):
         got = {p["vip"] for p in peers[up]} - {v[up]}
         check(f"node :{up} sees both room peers", len(got) >= 2, str(got))
 
+    # game-server announcement rides the mesh: Alpha serves, Bravo must list it
+    bg = json.loads(get(f"http://127.0.0.1:{U2}/api/games")[1])["games"]
+    check("game server announced across mesh",
+          any(g["vip"] == v[U1] and "CoD4" in g.get("title", "") for g in bg),
+          str(bg))
+
     # every pair in HALO-42 pings both ways through the encrypted mesh
-    for a, b in [(32441, 32442), (32441, 32446), (32442, 32446)]:
+    for a, b in [(U1, U2), (U1, U3), (U2, U3)]:
         for src, dst in ((a, b), (b, a)):
             try:
                 r = post(f"http://127.0.0.1:{src}/api/ping", {"vip": v[dst]}, timeout=12)
@@ -171,22 +203,22 @@ try:
 
     # room isolation: server must not leak Stranger into HALO-42; cross-room
     # pings must fail (different keys -> silent drop -> timeout)
-    with urllib.request.urlopen("http://127.0.0.1:32440/room/peers?room=HALO-42",
+    with urllib.request.urlopen(f"http://127.0.0.1:{SIG}/room/peers?room=HALO-42",
                                 timeout=5) as r:
         members = {m["node_id"] for m in json.loads(r.read())["peers"]}
     check("signaling isolates rooms", members == {"Alpha", "Bravo", "Coco"}, str(members))
     try:
-        r = post("http://127.0.0.1:32441/api/ping", {"vip": v[32448]}, timeout=12)
+        r = post(f"http://127.0.0.1:{U1}/api/ping", {"vip": v[U4]}, timeout=12)
         check("cross-room ping fails closed", r.get("ok") is False, str(r))
     except Exception as e:
         check("cross-room ping fails closed", False, str(e))
 
     # UI serves the app + room switching works
-    stt, body = get("http://127.0.0.1:32441/")
+    stt, body = get(f"http://127.0.0.1:{U1}/")
     check("UI page served", stt == 200 and b"LANLink" in body)
-    r = post("http://127.0.0.1:32448/api/room", {"room": "HALO-42"})
+    r = post(f"http://127.0.0.1:{U4}/api/room", {"room": "HALO-42"})
     check("room switch API", r.get("room") == "HALO-42", str(r))
-    post("http://127.0.0.1:32448/api/room", {"room": "OTHER-99"})
+    post(f"http://127.0.0.1:{U4}/api/room", {"room": "OTHER-99"})
 finally:
     for p in procs:
         try:
