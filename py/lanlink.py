@@ -31,6 +31,12 @@ VER = 1
 T_DATA, T_PING, T_PONG, T_PUNCH, T_LOBBY = 0x01, 0x02, 0x03, 0x04, 0x05
 HDLEN, TAGLEN = 20, 8
 BCAST_PORT = 32442
+VERSION = "1.2.0"
+
+# Well-known game ports. If one is already taken on THIS pc, a game server
+# is almost certainly running there -> we announce it automatically, so hosts
+# don't have to type anything. Heuristic, clearly labelled as auto-detected.
+GAME_PORTS = {28960: "CoD4", 28961: "CoD MW2", 2302: "Halo", 27015: "Source game"}
 
 
 def room_key(room: str) -> bytes:
@@ -150,6 +156,8 @@ class Node:
         self.disc_last = None  # timestamp of last foreign hello
         self.serve_title = (getattr(args, "serve", "") or "").strip()[:64]
         self.games = {}  # vip -> {title, node_id, seen} (game servers on the mesh)
+        self.auto_game = ""  # auto-detected local game server (no typing needed)
+        self._tick = 0
         self.seq = random.randint(1, 1 << 30)
         self.pending = {}
         self._stun_txn = None
@@ -169,7 +177,7 @@ class Node:
         return (ip.startswith("10.") or ip.startswith("192.168.")
                 or ip.startswith("172.16.") or ip.startswith("127."))
 
-    def learn_peer(self, vip, node_id, ep, src):
+    def learn_peer(self, vip, node_id, ep, src, room=""):
         """Add endpoint candidate; LAN/direct candidates always win as primary."""
         if not vip or vip == self.vip:
             return
@@ -178,10 +186,12 @@ class Node:
             e = self.peers.get(vip)
             if e is None:
                 e = {"node_id": node_id or "", "cands": {}, "primary": ep,
-                     "rtt": 0.0, "seen": time.time()}
+                     "rtt": 0.0, "seen": time.time(), "room": room or ""}
                 self.peers[vip] = e
             if node_id:
                 e["node_id"] = node_id
+            if room:
+                e["room"] = room
             e["cands"][ep] = src
             e["seen"] = time.time()
             cur = e["primary"]
@@ -313,7 +323,7 @@ class Node:
             if rvip == self.vip:
                 print(f"[discovery] VIP clash on {rvip} — staying (salt bump in Go build)")
                 continue
-            self.learn_peer(rvip, h.get("node_id", ""), ep, "lan")
+            self.learn_peer(rvip, h.get("node_id", ""), ep, "lan", h.get("room", ""))
             print(f"[discovery] LAN peer {h.get('node_id')} ({rvip}) via {ep[0]}:{ep[1]}")
             self.punch(ep)
 
@@ -387,7 +397,7 @@ class Node:
                         continue
                     if rvip == self.vip:
                         continue
-                    self.learn_peer(rvip, sp.get("node_id", ""), ep, "signal")
+                    self.learn_peer(rvip, sp.get("node_id", ""), ep, "signal", sp.get("room", ""))
                     print(f"[signal] room peer {sp.get('node_id')} ({rvip}) via {ep_s}")
                     self.punch_peer(rvip)  # both sides punch -> NATs open
             except Exception as e:
@@ -405,9 +415,33 @@ class Node:
         with urllib.request.urlopen(req, timeout=8) as r:
             return json.loads(r.read().decode()).get("peers", [])
 
+    def detect_local_game(self):
+        """Heuristic: a taken well-known game UDP port means a game server
+        runs on this PC. Exclusive bind attempt only — never held, never
+        steals traffic from the game."""
+        for port, game in GAME_PORTS.items():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.bind(("0.0.0.0", port))
+            except OSError:
+                return f"{game} server (auto-detected)"
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+        return ""
+
     def keepalive_loop(self):
         while True:
             time.sleep(5)
+            self._tick += 1
+            if self._tick % 6 == 1:  # re-scan ~every 30 s
+                found = self.detect_local_game()
+                if found != self.auto_game:
+                    self.auto_game = found
+                    if found:
+                        print(f"[lobby] auto-detected local game: {found}")
             with self.lock:
                 vips = list(self.peers.keys())
                 old = [k for k, v in self.peers.items() if time.time() - v["seen"] > 90]
@@ -415,8 +449,9 @@ class Node:
                     del self.peers[k]
             for vip in vips:
                 self.punch_peer(vip)  # hold every NAT mapping open
-            if self.serve_title:  # announce our hosted game to the whole mesh
-                payload = json.dumps({"title": self.serve_title, "node": self.name,
+            title = self.serve_title or self.auto_game
+            if title:  # announce our hosted game to the whole mesh
+                payload = json.dumps({"title": title, "node": self.name,
                                       "vip": self.vip}).encode()
                 for vip in vips:
                     for ep in self._cands(vip):
@@ -493,7 +528,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 rows = [{"node_id": v.get("node_id"), "vip": k,
                          "endpoint": f"{v['primary'][0]}:{v['primary'][1]}",
                          "source": v["cands"].get(v["primary"], ""),
-                         "cands": len(v["cands"]),
+                         "cands": len(v["cands"]), "room": v.get("room", ""),
                          "rtt_ms": v.get("rtt", 0.0)}
                         for k, v in self.node.peers.items()]
             return self._json({"peers": rows})
@@ -559,6 +594,7 @@ def main():
                     help="do not auto-open the UI page in a browser")
     ap.add_argument("--serve", default="",
                     help='announce a hosted game, e.g. --serve "CoD4 mp_shipment"')
+    ap.add_argument("--version", action="version", version="LANLink " + VERSION)
     args = ap.parse_args()
 
     n = Node(args)
@@ -573,7 +609,7 @@ def main():
 
     srv = ThreadingHTTPServer(("127.0.0.1", args.ui_port), UIHandler)
     url = f"http://127.0.0.1:{args.ui_port}"
-    print(f"[lanlink] node {n.name} vip={n.vip} room={n.room} "
+    print(f"[lanlink] LANLink v{VERSION} node {n.name} vip={n.vip} room={n.room} "
           f"mesh=:{args.mesh_port} ui={url}")
     print(f"[tun-stub] userspace mode (no Admin needed). "
           f"Go build + '-tun' as Admin attaches the real adapter.")

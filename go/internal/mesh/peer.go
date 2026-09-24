@@ -17,6 +17,7 @@ type Peer struct {
 	Primary  *net.UDPAddr            // best-known endpoint
 	Cands    map[string]*net.UDPAddr // every known endpoint: "ip:port" -> addr
 	CandSrc  map[string]string       // "lan" | "signal" | "mesh" per candidate
+	Room     string                  // last advertised room code ("" = unknown)
 	LastSeen time.Time
 	RTTms    float64
 }
@@ -54,6 +55,9 @@ func (t *Table) Learn(selfVIP net.IP, p *Peer) bool {
 	}
 	if p.NodeID != "" {
 		old.NodeID = p.NodeID
+	}
+	if p.Room != "" {
+		old.Room = p.Room
 	}
 	old.LastSeen = time.Now()
 	if p.Primary != nil {

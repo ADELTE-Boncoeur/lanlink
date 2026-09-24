@@ -111,7 +111,7 @@ func main() {
 		ep := &net.UDPAddr{IP: from.IP, Port: h.MeshPort}
 		n.peers.Learn(n.vip, &mesh.Peer{NodeID: h.NodeID, VIP: rvip, Primary: ep,
 			Cands: map[string]*net.UDPAddr{ep.String(): ep},
-			CandSrc: map[string]string{ep.String(): "lan"}})
+			CandSrc: map[string]string{ep.String(): "lan"}, Room: h.Room})
 		n.punchAddr(ep) // open NAT/stateful-firewall path back immediately
 		log.Printf("LAN peer: %s (%s) via %s room=%s", h.NodeID, h.VIP, ep, h.Room)
 	})
@@ -242,6 +242,21 @@ func (n *node) punchAll(vip net.IP) {
 	}
 }
 
+// gamePorts mirrors py/lanlink.py GAME_PORTS: a taken UDP port means a
+// local game server is running -> announced automatically, no typing needed.
+var gamePorts = map[int]string{28960: "CoD4", 28961: "CoD MW2", 2302: "Halo", 27015: "Source game"}
+
+func detectLocalGame() string {
+	for port, game := range gamePorts {
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+		if err != nil {
+			return game + " server (auto-detected)"
+		}
+		c.Close()
+	}
+	return ""
+}
+
 func (n *node) keepaliveLoop() {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -251,9 +266,13 @@ func (n *node) keepaliveLoop() {
 				n.punchAddr(ep)
 			}
 		}
-		if n.serve != "" { // announce our hosted game to the whole mesh
+		title := n.serve
+		if title == "" {
+			title = detectLocalGame()
+		}
+		if title != "" { // announce our hosted game to the whole mesh
 			payload, _ := json.Marshal(map[string]string{
-				"title": n.serve, "node": n.nodeID, "vip": n.vip.String()})
+				"title": title, "node": n.nodeID, "vip": n.vip.String()})
 			for _, p := range n.peers.All() {
 				for _, ep := range p.Candidates() {
 					frame := mesh.Seal(n.roomKey, n.vip, p.VIP, mesh.TypeLobby, n.nextSeq(), payload)
@@ -366,7 +385,7 @@ func (n *node) signalOnce() {
 		}
 		n.peers.Learn(n.vip, &mesh.Peer{NodeID: sp.NodeID, VIP: rvip, Primary: ep,
 			Cands: map[string]*net.UDPAddr{ep.String(): ep},
-			CandSrc: map[string]string{ep.String(): "signal"}})
+			CandSrc: map[string]string{ep.String(): "signal"}, Room: sp.Room})
 		n.punchAll(rvip) // both sides punch every candidate -> NATs open -> direct P2P
 	}
 }
@@ -388,6 +407,7 @@ func (n *node) uiMux() *http.ServeMux {
 			VIP      string  `json:"vip"`
 			Endpoint string  `json:"endpoint"`
 			Source   string  `json:"source"`
+			Room     string  `json:"room"`
 			Cands    int     `json:"cands"`
 			RTTms    float64 `json:"rtt_ms"`
 		}
@@ -398,7 +418,7 @@ func (n *node) uiMux() *http.ServeMux {
 				ep = p.Primary.String()
 				src = p.CandSrc[ep]
 			}
-			rows = append(rows, row{p.NodeID, p.VIP.String(), ep, src, len(p.Cands), p.RTTms})
+			rows = append(rows, row{p.NodeID, p.VIP.String(), ep, src, p.Room, len(p.Cands), p.RTTms})
 		}
 		writeJSON(w, map[string]any{"peers": rows})
 	})

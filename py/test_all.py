@@ -18,7 +18,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lanlink import (seal, open_frame, room_key, alloc_vip,
-                      parse_stun_response, T_PING)
+                      parse_stun_response, T_PING, Node, GAME_PORTS, VERSION)
 
 PASS, FAIL = 0, 0
 
@@ -95,6 +95,26 @@ resp = (struct.pack(">HHI", 0x0101, 8, cookie) + os.urandom(12)
 check("STUN response parsed", parse_stun_response(resp) == "203.154.104.22:45678",
       parse_stun_response(resp))
 check("non-STUN ignored", parse_stun_response(b"LLNK" + b"\x00" * 30) == "")
+
+ver = subprocess.run([sys.executable, "py/lanlink.py", "--version"],
+                     cwd=os.path.dirname(HERE), capture_output=True, text=True)
+check("version flag reports build", "LANLink " + VERSION in (ver.stdout + ver.stderr),
+      (ver.stdout + ver.stderr).strip())
+
+# auto-detect: occupy a well-known game port -> node must report a server
+probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    probe.bind(("0.0.0.0", 28960))
+    held_here = True
+except OSError:
+    held_here = False  # something real already serves CoD4 here — even better
+check("auto-detect sees occupied game port",
+      Node.detect_local_game(None) == "CoD4 server (auto-detected)",
+      Node.detect_local_game(None))
+probe.close()
+if held_here:
+    check("auto-detect quiet when ports free", Node.detect_local_game(None) == "",
+          Node.detect_local_game(None))
 
 # ---------------------------------------------------------------- live
 print("== LIVE: signaling + 4 nodes ==")
@@ -184,6 +204,9 @@ try:
     for up in (U1, U2, U3):
         got = {p["vip"] for p in peers[up]} - {v[up]}
         check(f"node :{up} sees both room peers", len(got) >= 2, str(got))
+    check("peers carry their room codes",
+          all(p.get("room") for up in (U1, U2, U3) for p in peers[up]),
+          str(peers[U1]))
 
     # game-server announcement rides the mesh: Alpha serves, Bravo must list it
     bg = json.loads(get(f"http://127.0.0.1:{U2}/api/games")[1])["games"]

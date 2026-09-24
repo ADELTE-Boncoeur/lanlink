@@ -32,14 +32,21 @@ async function refresh() {
     const tb = $("peers");
     tb.innerHTML = "";
     if (!rows.length) {
-      tb.innerHTML = '<tr><td colspan="6" class="empty">No peers yet — start a second node or share your room code.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7" class="empty">No peers yet — start a second node or share your room code.</td></tr>';
       return;
     }
+    const myRoom = (s.room || "").toLowerCase();
+    let strangers = 0;
     for (const r of rows) {
+      const rRoom = r.room || "";
+      const mismatch = rRoom && rRoom.toLowerCase() !== myRoom;
+      if (mismatch) strangers++;
       const tr = document.createElement("tr");
+      if (mismatch) tr.style.opacity = "0.55";
       const rtt = r.rtt_ms ? r.rtt_ms.toFixed(0) + " ms" : "—";
       tr.innerHTML = `<td>${r.node_id || "?"}</td><td class="mono">${r.vip}</td>` +
-        `<td class="mono">${r.endpoint || ""}</td><td>${r.source || ""}</td><td>${rtt}</td>`;
+        `<td class="mono">${r.endpoint || ""}</td><td>${r.source || ""}</td>` +
+        `<td class="mono">${escapeHtml(rRoom) || "?"}</td><td>${rtt}</td>`;
       const td = document.createElement("td");
       const b = document.createElement("button");
       b.textContent = "Ping";
@@ -57,6 +64,9 @@ async function refresh() {
       td.appendChild(b);
       tr.appendChild(td);
       tb.appendChild(tr);
+    }
+    if (strangers > 0) {
+      $("nethelp").innerHTML += `<p>⚠️ ${strangers} player(s) use a <b>different room code</b> — Ping and games only work in the same room. Type the identical code on all PCs.</p>`;
     }
   } catch (e) {
     log("UI error: " + e);
