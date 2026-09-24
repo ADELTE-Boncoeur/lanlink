@@ -16,6 +16,36 @@ password (your Room Code), so strangers can't read it or join in.
 
 ---
 
+## THE 5-MINUTE EXAMPLE — you + 1 friend + Call of Duty, same Wi-Fi
+
+Imagine: **you** host, your friend **Mike** joins. Same Wi-Fi. No internet needed.
+
+| Who | Runs | Room code |
+|---|---|---|
+| You (host) | `LANLink.exe` | `HALO-42` (you invent it) |
+| Mike | `LANLink.exe` | `HALO-42` (**same** code — yes, he types it too) |
+| Nobody | `LANLink-Server.exe` ❌ | — |
+
+`LANLink-Server.exe` is ONLY for friends in **different houses** (internet).
+On the same Wi-Fi, forget it exists — nobody runs it.
+
+1. **Both**: double-click `LANLink.exe` → browser opens → allow the firewall
+   popup (Private networks). Wait ~10 s → you see **each other in the
+   Players table**. Click **Ping** — a number means you're linked.
+2. **You (host)**: open CoD → Multiplayer → **Start New Server** (a normal
+   LAN server, like your friend sits next to you). Note YOUR virtual IP
+   from the LANLink page, e.g. `10.242.51.102`. Tell it to Mike.
+3. **Mike**: open CoD → enable console first (Options → Game Options →
+   Enable Console: Yes) → press the **`~`** key → type
+   `connect 10.242.51.102` (YOUR virtual IP) → Enter.
+4. **You both play.** 🎉
+
+⚠️ Honest note: Mike will probably **NOT** see your server in CoD's automatic
+server list — that auto-list needs a special network driver (the advanced
+`wintun` version, see ROADMAP.md). The `connect` command above is the way in,
+and it works in CoD4, CoD:WaW, MW2 and most old PC shooters with a console.
+If a game has "Connect to IP" in its menus, use that instead of the console.
+
 ## PART 1 — Install (every player, one time, ~2 minutes)
 
 **Easiest (no Python needed):** download **`LANLink.exe`** (single 5.6 MB file —
