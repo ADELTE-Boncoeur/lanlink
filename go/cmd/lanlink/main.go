@@ -118,20 +118,25 @@ func main() {
 			return
 		}
 		ep := &net.UDPAddr{IP: from.IP, Port: h.MeshPort}
-		learn := func(addr *net.UDPAddr, src string) {
-			n.peers.Learn(n.vip, &mesh.Peer{NodeID: h.NodeID, VIP: rvip, Primary: addr,
+		learn := func(addr *net.UDPAddr, src string) bool {
+			return n.peers.Learn(n.vip, &mesh.Peer{NodeID: h.NodeID, VIP: rvip, Primary: addr,
 				Cands: map[string]*net.UDPAddr{addr.String(): addr},
 				CandSrc: map[string]string{addr.String(): src}, Room: h.Room})
 		}
-		learn(ep, "lan")
+		fresh := learn(ep, "lan")
 		mine := map[string]bool{}
 		for _, ip := range discovery.LocalIPs() {
 			mine[ip] = true
 		}
 		for _, ip := range h.Ips { // every address the peer claims (multi-homed)
 			if pip := net.ParseIP(ip); pip != nil && !pip.IsLoopback() && !mine[ip] {
-				learn(&net.UDPAddr{IP: pip, Port: h.MeshPort}, "lan")
+				if learn(&net.UDPAddr{IP: pip, Port: h.MeshPort}, "lan") {
+					fresh = true
+				}
 			}
+		}
+		if fresh {
+			n.announceTo(rvip) // brand-new peer: list our game at once
 		}
 		n.punchAddr(ep) // open NAT/stateful-firewall path back immediately
 		log.Printf("LAN peer: %s (%s) via %s room=%s", h.NodeID, h.VIP, ep, h.Room)
@@ -184,9 +189,11 @@ func (n *node) meshRecvLoop() {
 		if err != nil {
 			continue // wrong room or corrupted — drop silently (cheap integrity)
 		}
-		n.peers.Learn(n.vip, &mesh.Peer{VIP: h.Src, Primary: from,
+		if n.peers.Learn(n.vip, &mesh.Peer{VIP: h.Src, Primary: from,
 			Cands: map[string]*net.UDPAddr{from.String(): from},
-			CandSrc: map[string]string{from.String(): "mesh"}})
+			CandSrc: map[string]string{from.String(): "mesh"}}) {
+			n.announceTo(h.Src)
+		}
 		switch h.Type {
 		case mesh.TypePing:
 			reply := mesh.Seal(n.roomKey, n.vip, h.Src, mesh.TypePong, h.Seq, pt)
@@ -266,6 +273,30 @@ func (n *node) punchAddr(ep *net.UDPAddr) {
 	_, _ = n.meshConn.WriteToUDP(frame, ep)
 }
 
+// announceTo immediately tells one peer about our hosted game (no waiting
+// for the 5 s tick) — first contact lists the server within a second.
+func (n *node) announceTo(vip net.IP) {
+	title := n.serve
+	if title == "" {
+		title = detectLocalGame()
+	}
+	if title == "" {
+		return
+	}
+	lan := ""
+	if ips := discovery.LocalIPs(); len(ips) > 0 {
+		lan = ips[0]
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"title": title, "node": n.nodeID, "vip": n.vip.String(), "lan": lan})
+	if p, ok := n.peers.Get(vip); ok {
+		for _, ep := range p.Candidates() {
+			frame := mesh.Seal(n.roomKey, n.vip, vip, mesh.TypeLobby, n.nextSeq(), payload)
+			_, _ = n.meshConn.WriteToUDP(frame, ep)
+		}
+	}
+}
+
 // punchAll tries every known candidate (happy-eyeballs hole punching).
 func (n *node) punchAll(vip net.IP) {
 	if p, ok := n.peers.Get(vip); ok {
@@ -303,18 +334,9 @@ func (n *node) keepaliveLoop() {
 		if title == "" {
 			title = detectLocalGame()
 		}
-		if title != "" { // announce our hosted game to the whole mesh
-			lan := ""
-			if ips := discovery.LocalIPs(); len(ips) > 0 {
-				lan = ips[0]
-			}
-			payload, _ := json.Marshal(map[string]string{
-				"title": title, "node": n.nodeID, "vip": n.vip.String(), "lan": lan})
+		if title != "" { // re-announce our hosted game to the whole mesh
 			for _, p := range n.peers.All() {
-				for _, ep := range p.Candidates() {
-					frame := mesh.Seal(n.roomKey, n.vip, p.VIP, mesh.TypeLobby, n.nextSeq(), payload)
-					_, _ = n.meshConn.WriteToUDP(frame, ep)
-				}
+				n.announceTo(p.VIP)
 			}
 		}
 		n.gamesMu.Lock()
@@ -430,6 +452,10 @@ func (n *node) signalOnce() {
 		n.peers.Learn(n.vip, &mesh.Peer{NodeID: sp.NodeID, VIP: rvip, Primary: ep,
 			Cands: map[string]*net.UDPAddr{ep.String(): ep},
 			CandSrc: map[string]string{ep.String(): "signal"}, Room: sp.Room})
+		if _, ok := n.peers.Get(rvip); ok {
+			// fresh or refreshed — make sure they hear about our game promptly
+			n.announceTo(rvip)
+		}
 		n.punchAll(rvip) // both sides punch every candidate -> NATs open -> direct P2P
 	}
 }

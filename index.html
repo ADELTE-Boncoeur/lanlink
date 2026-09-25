@@ -56,9 +56,9 @@ footer a{color:var(--acc)}
 <section class="card">
   <h2>Install in 3 steps (every player, once)</h2>
   <div class="steps">
-    <div class="step"><div class="n">1</div><div><b>Install Python</b> from <a href="https://www.python.org/downloads/" style="color:var(--acc)">python.org</a> — on the first setup screen tick <b>“Add python.exe to PATH”</b>.</div></div>
-    <div class="step"><div class="n">2</div><div><b>Download &amp; unzip</b> using the blue button above (or <a href="https://github.com/ADELTE-Boncoeur/lanlink" style="color:var(--acc)">clone the repo</a>) — Desktop or USB stick, anywhere.</div></div>
-    <div class="step"><div class="n">3</div><div><b>Allow the firewall popup</b> the first time you run it (tick Private networks → Allow access).</div></div>
+    <div class="step"><div class="n">1</div><div><b>Download <code>LANLink.exe</code></b> (blue button above — no Python needed) <b>plus</b> <code>start-player.bat</code> from the repo into one folder.</div></div>
+    <div class="step"><div class="n">2</div><div>Double-click <code>start-player.bat</code>. SmartScreen may say “Unknown publisher” → <b>More info → Run anyway</b>.</div></div>
+    <div class="step"><div class="n">3</div><div><b>Allow the firewall popup</b> (tick Private networks). Stuck? Run <code>fix-firewall.bat</code> as Administrator — it fixes firewall + network profile.</div></div>
   </div>
 </section>
 
@@ -70,9 +70,9 @@ footer a{color:var(--acc)}
   </div>
   <div id="wifi">
     <div class="steps">
-      <div class="step"><div class="n">1</div><div>Everyone double-clicks <code>start-player.bat</code>, types their name, presses Enter. A page opens: <code>http://127.0.0.1:32441</code>.</div></div>
-      <div class="step"><div class="n">2</div><div>Check the other players appear, then click <b>Ping</b> — anything under 100 ms is great.</div></div>
-      <div class="step"><div class="n">3</div><div>One person hosts the game in <b>LAN / Local multiplayer</b>. Others join with the host's virtual IP (<code>10.242.x.y</code> from the page). Play! 🎉</div></div>
+      <div class="step"><div class="n">1</div><div>Everyone double-clicks <code>start-player.bat</code>, types their name + the <b>same room code</b>, presses Enter. A page opens: <code>http://127.0.0.1:32441</code>.</div></div>
+      <div class="step"><div class="n">2</div><div>Check the other players appear, then click <b>Ping</b> — anything under 100 ms is great. Hosting? Type the game name so friends <b>SEE it in 🎮 Game servers</b> (auto-detected too).</div></div>
+      <div class="step"><div class="n">3</div><div>Click <b>Copy join IP</b> on the server, then in your game: <code>connect &lt;pasted-address&gt;</code> (CoD console <code>~</code>). Coordinate in 💬 Lobby chat. Play! 🎉</div></div>
     </div>
   </div>
   <div id="net" style="display:none">

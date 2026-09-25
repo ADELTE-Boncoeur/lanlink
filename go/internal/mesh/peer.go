@@ -31,7 +31,9 @@ type Table struct {
 
 func NewTable() *Table { return &Table{peers: map[string]*Peer{}} }
 
-// Learn inserts or refreshes a peer candidate. Returns false if this VIP is ours.
+// Learn inserts or refreshes a peer candidate. Returns true only when this
+// VIP is brand new (callers use it to trigger first-contact actions once).
+// Returns false for our own VIP or already-known peers.
 func (t *Table) Learn(selfVIP net.IP, p *Peer) bool {
 	if p.VIP.Equal(selfVIP) {
 		return false
@@ -89,7 +91,7 @@ func (t *Table) Learn(selfVIP net.IP, p *Peer) bool {
 	if p.RTTms != 0 {
 		old.RTTms = p.RTTms
 	}
-	return true
+	return false
 }
 
 // pickPrimary prefers a candidate on OUR subnet (fixes multi-homed PCs that

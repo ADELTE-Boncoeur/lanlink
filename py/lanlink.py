@@ -292,13 +292,15 @@ class Node:
         return out
 
     def learn_peer(self, vip, node_id, ep, src, room=""):
-        """Add endpoint candidate; subnet-aware primary (see _pick_primary)."""
+        """Add endpoint candidate; subnet-aware primary (see _pick_primary).
+        Returns True when this VIP is brand new to us."""
         if not vip or vip == self.vip:
-            return
+            return False
         ep = (ep[0], int(ep[1]))
         with self.lock:
             e = self.peers.get(vip)
-            if e is None:
+            is_new = e is None
+            if is_new:
                 e = {"node_id": node_id or "", "cands": {}, "primary": ep,
                      "rtt": 0.0, "seen": time.time(), "room": room or "",
                      "last": ep}
@@ -311,6 +313,7 @@ class Node:
             e["seen"] = time.time()
             e["last"] = ep
             e["primary"] = self._pick_primary(e) or ep
+            return is_new
 
     def same_lan(self, ip: str) -> bool:
         """True if ip shares one of our /24 subnets (direct CoD connect works)."""
@@ -381,7 +384,8 @@ class Node:
             except ValueError:
                 continue
             if src != self.vip:
-                self.learn_peer(src, "", frm, "mesh")
+                if self.learn_peer(src, "", frm, "mesh"):
+                    self.announce_to(src)
             if ptype == T_PING:
                 self.sock.sendto(seal(self.key, self.vip, src, T_PONG, seq, pt), frm)
             elif ptype == T_PONG:
@@ -462,9 +466,13 @@ class Node:
             if rvip == self.vip:
                 print(f"[discovery] VIP clash on {rvip} — staying (salt bump in Go build)")
                 continue
+            first = True
             for cand in self.candidates_from_hello(h, frm[0], rp):
-                self.learn_peer(rvip, h.get("node_id", ""), cand, "lan",
-                                h.get("room", ""))
+                is_new = self.learn_peer(rvip, h.get("node_id", ""), cand, "lan",
+                                         h.get("room", ""))
+                if first and is_new:
+                    self.announce_to(rvip)  # brand-new peer: list our game at once
+                first = False
             print(f"[discovery] LAN peer {h.get('node_id')} ({rvip}) via {ep[0]}:{ep[1]}")
             self.punch_peer(rvip)
 
@@ -539,7 +547,10 @@ class Node:
                         continue
                     if rvip == self.vip:
                         continue
-                    self.learn_peer(rvip, sp.get("node_id", ""), ep, "signal", sp.get("room", ""))
+                    fresh = self.learn_peer(rvip, sp.get("node_id", ""), ep,
+                                                "signal", sp.get("room", ""))
+                    if fresh:
+                        self.announce_to(rvip)
                     print(f"[signal] room peer {sp.get('node_id')} ({rvip}) via {ep_s}")
                     self.punch_peer(rvip)  # both sides punch -> NATs open
             except Exception as e:
@@ -574,6 +585,22 @@ class Node:
                     pass
         return ""
 
+    def announce_to(self, vip):
+        """Immediately tell one peer about our hosted game (no waiting for
+        the 5 s tick) — first contact lists the server within a second."""
+        title = self.serve_title or self.auto_game
+        if not title:
+            return
+        payload = json.dumps({"title": title, "node": self.name,
+                              "vip": self.vip,
+                              "lan": (self._local_ips() or [""])[0]}).encode()
+        for ep in self._cands(vip):
+            try:
+                self.sock.sendto(seal(self.key, self.vip, vip, T_LOBBY,
+                                      self.next_seq(), payload), ep)
+            except Exception:
+                pass
+
     def keepalive_loop(self):
         while True:
             time.sleep(5)
@@ -592,17 +619,9 @@ class Node:
             for vip in vips:
                 self.punch_peer(vip)  # hold every NAT mapping open
             title = self.serve_title or self.auto_game
-            if title:  # announce our hosted game to the whole mesh
-                lan = (self._local_ips() or [""])[0]
-                payload = json.dumps({"title": title, "node": self.name,
-                                      "vip": self.vip, "lan": lan}).encode()
+            if title:  # re-announce our hosted game to the whole mesh
                 for vip in vips:
-                    for ep in self._cands(vip):
-                        try:
-                            self.sock.sendto(seal(self.key, self.vip, vip, T_LOBBY,
-                                                  self.next_seq(), payload), ep)
-                        except Exception:
-                            pass
+                    self.announce_to(vip)
             with self.lock:  # expire silent game servers
                 dead = [k for k, g in self.games.items() if time.time() - g["seen"] > 40]
                 for k in dead:

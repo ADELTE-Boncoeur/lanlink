@@ -23,7 +23,7 @@ import uuid
 
 _ADAPTER_NAME = "LANLink"
 _TUNNEL_TYPE = "LANLink"
-_GUID = uuid.uuid5(uuid.NAMESPACE_DNS, "lanlink-virtual-adapter")
+_ADAPTER_GUID = uuid.uuid5(uuid.NAMESPACE_DNS, "lanlink-virtual-adapter")
 
 
 class _GUID(ctypes.Structure):
@@ -136,7 +136,7 @@ def attach_tun(vip: str):
         dll.WintunCloseAdapter.argtypes = [ctypes.c_void_p]
 
         adapter = dll.WintunCreateAdapter(_ADAPTER_NAME, _TUNNEL_TYPE,
-                                          ctypes.byref(_to_guid(_GUID)))
+                                          ctypes.byref(_to_guid(_ADAPTER_GUID)))
         if not adapter:
             print("[tun] WintunCreateAdapter failed (driver installed? admin?).")
             return None
@@ -163,3 +163,25 @@ def attach_tun(vip: str):
             print(f"[tun] netsh failed ({e}) — continuing anyway")
     print(f"[tun] adapter '{_ADAPTER_NAME}' UP with {vip}/16 — game packets now flow.")
     return TunDevice(dll, adapter, session)
+
+
+def selftest():
+    """Safe pre-flight check: no driver calls, no admin needed. Exit 0 = ran fine."""
+    import platform
+    print(f"wintun selftest: python {platform.python_version()} "
+          f"{platform.machine()} on {platform.system()} {platform.release()}")
+    print(f"admin: {'YES' if is_admin() else 'no (adapter creation will refuse)'}")
+    path = _dll_path()
+    print(f"wintun.dll: {path if path else 'NOT FOUND next to the app (see https://www.wintun.net)'}")
+    again = _to_guid(_ADAPTER_GUID)
+    first = _to_guid(_ADAPTER_GUID)
+    stable = (again.Data1, again.Data2, again.Data3) == (
+        first.Data1, first.Data2, first.Data3)
+    print(f"adapter id stable: {'YES' if stable else 'NO'}")
+    print("selftest done (driver attach itself needs Admin + the DLL).")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys as _sys
+    _sys.exit(selftest() if "--selftest" in _sys.argv else 0)
